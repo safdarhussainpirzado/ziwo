@@ -33,3 +33,16 @@ Thumbs.db
 *.key
 *.crt
 haproxy/certs/
+# Python environment
+venv/
+
+# Windows junk
+Thumbs.db
+*.lnk
+
+# Temporary files
+*.tmp
+temp.js
+temp_js.js
+routes.txt
+sedVmV4qw
