@@ -1,0 +1,12 @@
+@charset "UTF-8";
+@import '@fortawesome/fontawesome-free/css/all.min.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/* Custom grid utility not available in base Tailwind */
+.grid-cols-24 {
+    grid-template-columns: repeat(24, minmax(0, 1fr));
+}

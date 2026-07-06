@@ -1,0 +1,42 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Environment and Secrets
+.env
+*.key
+storage/*.key
+
+# Dependencies
+vendor
+node_modules
+
+# Build artifacts and caches
+public/build
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*.php
+bootstrap/cache/*.php
+.phpunit.result.cache
+
+# IDEs and Tools
+.vscode
+.idea
+.docker
+docker-compose*.yml
+Dockerfile*
+Makefile
+README.md
+
+# Documentation and Tests
+tests
+docs
+
+# Logs
+*.log
+storage/logs/*.log
+
+# Files to keep
+!/public/build
+!.gitignore

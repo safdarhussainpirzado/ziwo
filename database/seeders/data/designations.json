@@ -1,0 +1,522 @@
+[
+    {
+        "name": "Inspector General",
+        "short_code": "IG",
+        "bps": 22,
+        "similar_rank": "Inspector General",
+        "type": "Uniform",
+        "is_active": 0
+    },
+    {
+        "name": "Inspector General",
+        "short_code": "IG",
+        "bps": 21,
+        "similar_rank": "Inspector General",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Additional Inspector General",
+        "short_code": "Addl IG",
+        "bps": 21,
+        "similar_rank": "Additional Inspector General",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Deputy Inspector General",
+        "short_code": "DIG",
+        "bps": 20,
+        "similar_rank": "Deputy Inspector General",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Assistant Inspector General",
+        "short_code": "AIG",
+        "bps": 19,
+        "similar_rank": "Senior Superintendent of Police",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Assistant Inspector General",
+        "short_code": "AIG",
+        "bps": 18,
+        "similar_rank": "Superintendent of Police",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Senior Superintendent of Police",
+        "short_code": "SSP",
+        "bps": 19,
+        "similar_rank": "Senior Superintendent of Police",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Superintendent of Police",
+        "short_code": "SP",
+        "bps": 18,
+        "similar_rank": "Superintendent of Police",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Acting Superintendent of Police",
+        "short_code": "Acting SP",
+        "bps": 17,
+        "similar_rank": "Acting Superintendent of Police",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Chief Patrol Officer",
+        "short_code": "DSP\/CPO",
+        "bps": 17,
+        "similar_rank": "Deputy Superintendent of Police",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Chief Patrol Officer",
+        "short_code": "ASP\/CPO",
+        "bps": 17,
+        "similar_rank": "Assistant Superintendent of Police",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Acting Chief Patrol Officer",
+        "short_code": "A\/CPO",
+        "bps": 16,
+        "similar_rank": "Inspector",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Senior Patrol Officer",
+        "short_code": "IP\/SPO",
+        "bps": 16,
+        "similar_rank": "Inspector",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Patrol Officer",
+        "short_code": "SI\/PO",
+        "bps": 14,
+        "similar_rank": "Sub Inspector",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Senior Assistant Patrol Officer",
+        "short_code": "SAPO",
+        "bps": 11,
+        "similar_rank": "Assitant Sub Inspector",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Assistant Patrol Officer",
+        "short_code": "HC\/APO",
+        "bps": 9,
+        "similar_rank": "Head Contable",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Junior Patrol Officer",
+        "short_code": "C\/JPO",
+        "bps": 7,
+        "similar_rank": "Constable",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Director",
+        "short_code": "Director",
+        "bps": 19,
+        "similar_rank": "Director",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Incharge Medical Officer",
+        "short_code": "IMO",
+        "bps": 19,
+        "similar_rank": "Incharge Medical Officer",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Doctor",
+        "short_code": "Dr",
+        "bps": 18,
+        "similar_rank": "Doctor",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Deputy Director",
+        "short_code": "DD",
+        "bps": 18,
+        "similar_rank": "Deputy Director",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Assistant Director",
+        "short_code": "AD",
+        "bps": 17,
+        "similar_rank": "Assistant Director",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Accounts Officer",
+        "short_code": "AO",
+        "bps": 17,
+        "similar_rank": "Accounts Officer",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Private Secretary",
+        "short_code": "PS",
+        "bps": 18,
+        "similar_rank": "Private Secretary",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Private Secretary",
+        "short_code": "PS",
+        "bps": 17,
+        "similar_rank": "Private Secretary",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Computer Programmer",
+        "short_code": "CP",
+        "bps": 17,
+        "similar_rank": "Computer Programmer",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Public Relation Officer",
+        "short_code": "PRO",
+        "bps": 17,
+        "similar_rank": "Public Relation Officer",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Accountant",
+        "short_code": "ACCT",
+        "bps": 16,
+        "similar_rank": "Accountant",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Office Superintendent",
+        "short_code": "OS",
+        "bps": 16,
+        "similar_rank": "Office Superintendent",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Land Acquiring Officer",
+        "short_code": "LAO",
+        "bps": 16,
+        "similar_rank": "Land Acquiring Officer",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Asstt. Computer Programmer",
+        "short_code": "ACP",
+        "bps": 16,
+        "similar_rank": "Computer Operator",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Assistant Private Secretary",
+        "short_code": "APS",
+        "bps": 16,
+        "similar_rank": "Assistant Private Secretary",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Stenographer",
+        "short_code": "Steno Gr",
+        "bps": 16,
+        "similar_rank": "Stenographer",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Assistant  ",
+        "short_code": "Assit",
+        "bps": 15,
+        "similar_rank": "Assistant  ",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Stenotypist",
+        "short_code": "StenoTy",
+        "bps": 12,
+        "similar_rank": "Stenotypist",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Upper Division Clerk",
+        "short_code": "UDC",
+        "bps": 12,
+        "similar_rank": "Upper Division Clerk",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Field Assistant",
+        "short_code": "F Assit",
+        "bps": 11,
+        "similar_rank": "Field Assistant",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Photographer",
+        "short_code": "PG",
+        "bps": 10,
+        "similar_rank": "Photographer",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Draftsman",
+        "short_code": "DFTMN",
+        "bps": 10,
+        "similar_rank": "Draftsman",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Lower Division Clerk",
+        "short_code": "LDC",
+        "bps": 9,
+        "similar_rank": "Lower Division Clerk",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Electrician Supervisor",
+        "short_code": "Elec Super",
+        "bps": 7,
+        "similar_rank": "Electrician Supervisor",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Mechanical Supervisor",
+        "short_code": "Mech Super",
+        "bps": 7,
+        "similar_rank": "Mechanical Supervisor",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Plumber Supervisor",
+        "short_code": "Plum Super",
+        "bps": 7,
+        "similar_rank": "Plumber Supervisor",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Para Medical Staff",
+        "short_code": "PMS",
+        "bps": 7,
+        "similar_rank": "Para Medical Staff",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Driver",
+        "short_code": "DRV",
+        "bps": 7,
+        "similar_rank": "Driver",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Tailor",
+        "short_code": "Tailor",
+        "bps": 7,
+        "similar_rank": "Tailor",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Khatib",
+        "short_code": "Khatib",
+        "bps": 7,
+        "similar_rank": "Khatib",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Auto Mechanic",
+        "short_code": "Auto Mech",
+        "bps": 5,
+        "similar_rank": "Auto Mechanic",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Electrician",
+        "short_code": "Elec",
+        "bps": 5,
+        "similar_rank": "Electrician",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Plumber",
+        "short_code": "Plum",
+        "bps": 5,
+        "similar_rank": "Plumber",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Dispatch Rider",
+        "short_code": "Disp R",
+        "bps": 5,
+        "similar_rank": "Dispatch Rider",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Mess Staff",
+        "short_code": "Mess Staff",
+        "bps": 5,
+        "similar_rank": "Mess Staff",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Orderly",
+        "short_code": "Orderly",
+        "bps": 5,
+        "similar_rank": "Orderly",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Helper",
+        "short_code": "Hlpr",
+        "bps": 5,
+        "similar_rank": "Helper",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Store Helper",
+        "short_code": "Store Hlpr",
+        "bps": 2,
+        "similar_rank": "Store Helper",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Mali",
+        "short_code": "Mali",
+        "bps": 2,
+        "similar_rank": "Mali",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Cook",
+        "short_code": "Cook",
+        "bps": 2,
+        "similar_rank": "Cook",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Helper Cook",
+        "short_code": "Hlpr Cook",
+        "bps": 2,
+        "similar_rank": "Helper Cook",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Washerman",
+        "short_code": "Washerman",
+        "bps": 2,
+        "similar_rank": "Washerman",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Barber",
+        "short_code": "Barber",
+        "bps": 2,
+        "similar_rank": "Barber",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Sweeper",
+        "short_code": "Sweeper",
+        "bps": 2,
+        "similar_rank": "Sweeper",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Helper",
+        "short_code": "Hlpr",
+        "bps": 2,
+        "similar_rank": "Helper",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Helper",
+        "short_code": "Hlpr",
+        "bps": 1,
+        "similar_rank": "Helper",
+        "type": "Non-Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Junior Patrol Officer",
+        "short_code": "C\/JPO",
+        "bps": 5,
+        "similar_rank": "Constable",
+        "type": "Uniform",
+        "is_active": 1
+    },
+    {
+        "name": "Senior Patrol Officer",
+        "short_code": "IP\/SPO",
+        "bps": 17,
+        "similar_rank": "Inspector",
+        "type": "Uniform",
+        "is_active": 1
+    }
+]

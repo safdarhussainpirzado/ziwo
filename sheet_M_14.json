@@ -1,0 +1,34 @@
+[
+  {
+    "M-14  0459395055": "Beat",
+    "__EMPTY": "Location / Land Mark",
+    "__EMPTY_1": "Mile Stone",
+    "__EMPTY_2": "Near by Cities",
+    "__EMPTY_3": "Fuel Stations"
+  },
+  {
+    "M-14  0459395055": "Beat-1    M-14                            (0-63)",
+    "__EMPTY": "Starting  Point From M-1",
+    "__EMPTY_1": 0,
+    "__EMPTY_2": "...",
+    "__EMPTY_3": ".."
+  },
+  {
+    "__EMPTY": "Fateh Jhang Interchange",
+    "__EMPTY_1": 25,
+    "__EMPTY_2": "(Fateh Jhang,Kohat Road)",
+    "__EMPTY_3": "500 M Nb"
+  },
+  {
+    "M-14  0459395055": 572369077,
+    "__EMPTY": "Thatti Kallran Interchange",
+    "__EMPTY_1": 63,
+    "__EMPTY_2": "(PindiGheb,Kohat Road)"
+  },
+  {
+    "M-14  0459395055": "Beat-2                                     M-14  (63-123)                                    ",
+    "__EMPTY": "Thatti Kallran Interchange",
+    "__EMPTY_1": 63,
+    "__EMPTY_2": "         (PindiGheb,Kohat Road)"
+  }
+]

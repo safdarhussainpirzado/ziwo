@@ -1,0 +1,45 @@
+[
+  {
+    "MOTORWAY NORTH ZONE 051-9278808  03328934224": "M-1 0938490463  \r\n03315999130 ",
+    "__EMPTY_5": "M15  E-35 0992920999  03168153796"
+  },
+  {
+    "MOTORWAY NORTH ZONE 051-9278808  03328934224": "Beat",
+    "__EMPTY": "Location / Land Mark",
+    "__EMPTY_1": "Mile\r\nStone",
+    "__EMPTY_2": "Near By Cities",
+    "__EMPTY_3": "Fuel Station",
+    "__EMPTY_5": "Beat-01\r\nE-35",
+    "__EMPTY_6": "Location / Land Mark",
+    "__EMPTY_7": "Mile Stone",
+    "__EMPTY_8": "Near by Cities",
+    "__EMPTY_9": "Fuel Pump"
+  },
+  {
+    "MOTORWAY NORTH ZONE 051-9278808  03328934224": "Beat-01\r\nM-1",
+    "__EMPTY": "Motorway Start Point",
+    "__EMPTY_1": 504,
+    "__EMPTY_2": "Peshawar",
+    "__EMPTY_3": "1 KM",
+    "__EMPTY_6": "Jhari Kass Interchange",
+    "__EMPTY_7": 18,
+    "__EMPTY_8": "Haripur",
+    "__EMPTY_9": "500 Meters"
+  },
+  {
+    "__EMPTY": "Peshawar Toll Plaza (Beat Start/End Point)",
+    "__EMPTY_1": 497,
+    "__EMPTY_6": "Kot Najeebullah Interchange",
+    "__EMPTY_7": "24-N",
+    "__EMPTY_8": "Khanpur",
+    "__EMPTY_9": "1 Kms"
+  },
+  {
+    "__EMPTY": "River Kabul",
+    "__EMPTY_1": 486,
+    "__EMPTY_6": "Hattar Interchange",
+    "__EMPTY_7": "24-S",
+    "__EMPTY_8": "Hattar",
+    "__EMPTY_9": "2 Kms"
+  }
+]

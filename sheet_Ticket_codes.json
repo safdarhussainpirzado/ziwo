@@ -1,0 +1,37 @@
+[
+  {
+    "NHMP OFFENCE CODES AND PENALTIES": "Sr.No.",
+    "__EMPTY": "Code",
+    "__EMPTY_1": "Offence",
+    "__EMPTY_2": "Before Fine\r\nEnhancement",
+    "__EMPTY_3": "After Fine\r\nEnhancement"
+  },
+  {
+    "NHMP OFFENCE CODES AND PENALTIES": 1,
+    "__EMPTY": "A20",
+    "__EMPTY_1": "Driving when disqualified",
+    "__EMPTY_2": 1000,
+    "__EMPTY_3": 1000
+  },
+  {
+    "NHMP OFFENCE CODES AND PENALTIES": 2,
+    "__EMPTY": "A21",
+    "__EMPTY_1": "Obtaining or Applying for a driving licence without disclosing particulars of\r\nendorsement",
+    "__EMPTY_2": "500-1000",
+    "__EMPTY_3": "500-1000"
+  },
+  {
+    "NHMP OFFENCE CODES AND PENALTIES": 3,
+    "__EMPTY": "A22",
+    "__EMPTY_1": "Offence relating to construction of vehicle",
+    "__EMPTY_2": "500-1000",
+    "__EMPTY_3": "500-1000"
+  },
+  {
+    "NHMP OFFENCE CODES AND PENALTIES": 4,
+    "__EMPTY": "A23",
+    "__EMPTY_1": "Offence relating to permits",
+    "__EMPTY_2": "1000-2000",
+    "__EMPTY_3": "500-1000"
+  }
+]

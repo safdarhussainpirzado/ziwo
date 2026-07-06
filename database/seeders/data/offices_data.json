@@ -1,0 +1,1231 @@
+{
+    "regions": [
+        {
+            "id": 1,
+            "name": "North Region",
+            "operational_type": "field"
+        },
+        {
+            "id": 2,
+            "name": "Central Region",
+            "operational_type": "field"
+        },
+        {
+            "id": 3,
+            "name": "South Region",
+            "operational_type": "field"
+        }
+    ],
+    "zones": [
+        {
+            "id": 1,
+            "name": "Motorway North",
+            "region_id": 1,
+            "operational_type": "field",
+            "phone": "051-9278808, 03328934224"
+        },
+        {
+            "id": 2,
+            "name": "Motorway C-I",
+            "region_id": 2,
+            "operational_type": "field",
+            "phone": ""
+        },
+        {
+            "id": 3,
+            "name": "Motorway C-II",
+            "region_id": 2,
+            "operational_type": "field",
+            "phone": ""
+        },
+        {
+            "id": 4,
+            "name": "N5 North",
+            "region_id": 1,
+            "operational_type": "field",
+            "phone": "051-9278808, 03328934224"
+        },
+        {
+            "id": 5,
+            "name": "N5 Central",
+            "region_id": 2,
+            "operational_type": "field",
+            "phone": "04299332852, 03104673937"
+        },
+        {
+            "id": 6,
+            "name": "N5 South",
+            "region_id": 3,
+            "operational_type": "field",
+            "phone": "02199333336, 02199333377, 02199333378, 03155159479"
+        },
+        {
+            "id": 7,
+            "name": "West",
+            "region_id": 3,
+            "operational_type": "field",
+            "phone": "0819203974, 0819203991, 03158491578"
+        }
+    ],
+    "sectors": [
+        {
+            "id": 1,
+            "name": "M1",
+            "zone_id": 1,
+            "phone": "0938490463, 03315999130",
+            "short_name": ""
+        },
+        {
+            "id": 2,
+            "name": "M2 North",
+            "zone_id": 1,
+            "phone": "0486886112, 03143455894",
+            "short_name": ""
+        },
+        {
+            "id": 3,
+            "name": "E35",
+            "zone_id": 1,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 4,
+            "name": "Swat Expressway",
+            "zone_id": 1,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 5,
+            "name": "M14",
+            "zone_id": 1,
+            "phone": "0938490463, 03315999130",
+            "short_name": ""
+        },
+        {
+            "id": 6,
+            "name": "M2 South",
+            "zone_id": 2,
+            "phone": "0486886112, 03143455894",
+            "short_name": ""
+        },
+        {
+            "id": 7,
+            "name": "M3",
+            "zone_id": 2,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 8,
+            "name": "LSM",
+            "zone_id": 2,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 9,
+            "name": "M4",
+            "zone_id": 3,
+            "phone": "0462526025, 03158706114",
+            "short_name": ""
+        },
+        {
+            "id": 10,
+            "name": "M4-Sub Sector",
+            "zone_id": 3,
+            "phone": "0462526025, 03158706114",
+            "short_name": ""
+        },
+        {
+            "id": 11,
+            "name": "M5-1",
+            "zone_id": 3,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 12,
+            "name": "M5-2",
+            "zone_id": 3,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 13,
+            "name": "North1",
+            "zone_id": 4,
+            "phone": "0923695033",
+            "short_name": ""
+        },
+        {
+            "id": 14,
+            "name": "North2",
+            "zone_id": 4,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 15,
+            "name": "North3",
+            "zone_id": 4,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 16,
+            "name": "IMDC",
+            "zone_id": 4,
+            "short_name": "IMDC",
+            "phone": ""
+        },
+        {
+            "id": 17,
+            "name": "Central1",
+            "zone_id": 5,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 18,
+            "name": "Central2",
+            "zone_id": 5,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 19,
+            "name": "Central3",
+            "zone_id": 5,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 20,
+            "name": "South1",
+            "zone_id": 6,
+            "short_name": "Sukkur",
+            "phone": "0719310878, 03155158894"
+        },
+        {
+            "id": 21,
+            "name": "South2",
+            "zone_id": 6,
+            "short_name": "Sakrand",
+            "phone": ""
+        },
+        {
+            "id": 22,
+            "name": "South3",
+            "zone_id": 6,
+            "short_name": "Saeedabad",
+            "phone": ""
+        },
+        {
+            "id": 23,
+            "name": "N55-1",
+            "zone_id": 6,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 24,
+            "name": "Sector-I Uthal N-25",
+            "zone_id": 7,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 25,
+            "name": "Sector-III Kalat N-25 ",
+            "zone_id": 7,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 26,
+            "name": "N10-Gwadar",
+            "zone_id": 7,
+            "phone": "0923695033",
+            "short_name": ""
+        },
+        {
+            "id": 27,
+            "name": "N50-QilaSaifullah",
+            "zone_id": 7,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 44,
+            "name": "N55-2",
+            "zone_id": 6,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 45,
+            "name": "KKH",
+            "zone_id": 1,
+            "phone": "05811942000",
+            "short_name": ""
+        },
+        {
+            "id": 46,
+            "name": "South4",
+            "zone_id": 6,
+            "phone": "",
+            "short_name": ""
+        }
+    ],
+    "beats": [
+        {
+            "id": 1,
+            "name": "Beat-01",
+            "sector_id": 1,
+            "km_start": 459,
+            "km_end": 500,
+            "short_name": "",
+            "phone": ""
+        },
+        {
+            "id": 2,
+            "name": "Beat-02",
+            "sector_id": 1,
+            "km_start": 420,
+            "km_end": 458,
+            "short_name": "",
+            "phone": ""
+        },
+        {
+            "id": 3,
+            "name": "Beat-03",
+            "sector_id": 1,
+            "km_start": 387,
+            "km_end": 419,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 4,
+            "name": "Beat-04",
+            "sector_id": 1,
+            "km_start": 350,
+            "km_end": 386,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 5,
+            "name": "Beat-05",
+            "sector_id": 2,
+            "km_start": 314,
+            "km_end": 349,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 6,
+            "name": "Beat-06",
+            "sector_id": 2,
+            "km_start": 266,
+            "km_end": 313,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 7,
+            "name": "Beat-07",
+            "sector_id": 2,
+            "km_start": 213,
+            "km_end": 265,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 8,
+            "name": "Beat-08",
+            "sector_id": 2,
+            "km_start": 162,
+            "km_end": 212,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 9,
+            "name": "Beat-01",
+            "sector_id": 3,
+            "km_start": 0,
+            "km_end": 44,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 10,
+            "name": "Beat-02",
+            "sector_id": 3,
+            "km_start": 45,
+            "km_end": 84,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 11,
+            "name": "Beat-03",
+            "sector_id": 3,
+            "km_start": 85,
+            "km_end": 128,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 12,
+            "name": "Beat-04",
+            "sector_id": 3,
+            "km_start": 129,
+            "km_end": 174,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 13,
+            "name": "Beat-01",
+            "sector_id": 4,
+            "km_start": 0,
+            "km_end": 49,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 14,
+            "name": "Beat-02",
+            "sector_id": 4,
+            "km_start": 50,
+            "km_end": 80,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 15,
+            "name": "Beat-01",
+            "sector_id": 5,
+            "km_start": 459,
+            "km_end": 500,
+            "short_name": "",
+            "phone": ""
+        },
+        {
+            "id": 16,
+            "name": "Beat-02",
+            "sector_id": 5,
+            "km_start": 420,
+            "km_end": 458,
+            "short_name": "M-14 (63-123)",
+            "phone": ""
+        },
+        {
+            "id": 17,
+            "name": "Beat-03",
+            "sector_id": 5,
+            "km_start": 387,
+            "km_end": 419,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 18,
+            "name": "Beat-04",
+            "sector_id": 5,
+            "km_start": 350,
+            "km_end": 386,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 19,
+            "name": "Beat-05",
+            "sector_id": 5,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 20,
+            "name": "Beat-09",
+            "sector_id": 6,
+            "km_start": 115,
+            "km_end": 161,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 21,
+            "name": "Beat-10",
+            "sector_id": 6,
+            "km_start": 65,
+            "km_end": 114,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 22,
+            "name": "Beat-11",
+            "sector_id": 6,
+            "km_start": 26,
+            "km_end": 64,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 23,
+            "name": "Beat-12",
+            "sector_id": 6,
+            "km_start": 0,
+            "km_end": 25,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 24,
+            "name": "Beat-13",
+            "sector_id": 7,
+            "km_start": 1099,
+            "km_end": 1148,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 25,
+            "name": "Beat-14",
+            "sector_id": 7,
+            "km_start": 1046,
+            "km_end": 1098,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 26,
+            "name": "Beat-15",
+            "sector_id": 7,
+            "km_start": 980,
+            "km_end": 1045,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 27,
+            "name": "Beat-16",
+            "sector_id": 7,
+            "km_start": 920,
+            "km_end": 979,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 28,
+            "name": "Beat-01",
+            "sector_id": 8,
+            "km_start": 7,
+            "km_end": 43,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 29,
+            "name": "Beat-02",
+            "sector_id": 8,
+            "km_start": 43,
+            "km_end": 91,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 30,
+            "name": "Beat-17",
+            "sector_id": 9,
+            "km_start": 237,
+            "km_end": 290,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 31,
+            "name": "Beat-18",
+            "sector_id": 9,
+            "km_start": 180,
+            "km_end": 238,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 32,
+            "name": "Beat-19",
+            "sector_id": 9,
+            "km_start": 119,
+            "km_end": 179,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 33,
+            "name": "Beat-20",
+            "sector_id": 9,
+            "km_start": 89,
+            "km_end": 119,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 34,
+            "name": "Beat-21",
+            "sector_id": 10,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 35,
+            "name": "Beat-22",
+            "sector_id": 10,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 36,
+            "name": "Beat-23",
+            "sector_id": 11,
+            "km_start": 724,
+            "km_end": 772,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 37,
+            "name": "Beat-24",
+            "sector_id": 11,
+            "km_start": 680,
+            "km_end": 723,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 38,
+            "name": "Beat-25",
+            "sector_id": 11,
+            "km_start": 630,
+            "km_end": 679,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 39,
+            "name": "Beat-26",
+            "sector_id": 11,
+            "km_start": 580,
+            "km_end": 629,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 40,
+            "name": "Beat-27",
+            "sector_id": 12,
+            "km_start": 529,
+            "km_end": 579,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 41,
+            "name": "Beat-28",
+            "sector_id": 12,
+            "km_start": 479,
+            "km_end": 528,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 42,
+            "name": "Beat-29",
+            "sector_id": 12,
+            "km_start": 431,
+            "km_end": 478,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 43,
+            "name": "Beat-30",
+            "sector_id": 12,
+            "km_start": 384,
+            "km_end": 430,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 44,
+            "name": "Beat-01",
+            "sector_id": 13,
+            "km_start": 1660,
+            "km_end": 1691,
+            "phone": "0923580220",
+            "short_name": "Azakhel"
+        },
+        {
+            "id": 45,
+            "name": "Beat-02",
+            "sector_id": 13,
+            "km_start": 1627,
+            "km_end": 1654,
+            "phone": "0923563056",
+            "short_name": "hakimabad"
+        },
+        {
+            "id": 46,
+            "name": "Beat-03",
+            "sector_id": 13,
+            "km_start": 1583,
+            "km_end": 1627,
+            "phone": "0572542766",
+            "short_name": "Kamra"
+        },
+        {
+            "id": 47,
+            "name": "Beat-04",
+            "sector_id": 13,
+            "km_start": 1550,
+            "km_end": 1583,
+            "phone": "0519330044, 03355302144",
+            "short_name": "Taxila"
+        },
+        {
+            "id": 48,
+            "name": "Beat-05",
+            "sector_id": 14,
+            "km_start": 1490,
+            "km_end": 1533,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 49,
+            "name": "Beat-06",
+            "sector_id": 14,
+            "km_start": 1446,
+            "km_end": 1490,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 50,
+            "name": "Beat-07",
+            "sector_id": 14,
+            "km_start": 1409,
+            "km_end": 1446,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 51,
+            "name": "Beat-08",
+            "sector_id": 15,
+            "km_start": 1369,
+            "km_end": 1409,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 52,
+            "name": "Beat-09",
+            "sector_id": 15,
+            "km_start": 1335,
+            "km_end": 1369,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 53,
+            "name": "Beat-10",
+            "sector_id": 15,
+            "km_start": 1305,
+            "km_end": 1335,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 54,
+            "name": "Beat-11",
+            "sector_id": 15,
+            "km_start": 1275,
+            "km_end": 1305,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 55,
+            "name": "Beat-01-IMDC",
+            "sector_id": 16,
+            "km_start": 13,
+            "km_end": 55,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 56,
+            "name": "Beat-12",
+            "sector_id": 17,
+            "km_start": 1211,
+            "km_end": 1245,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 57,
+            "name": "Beat-13",
+            "sector_id": 17,
+            "km_start": 1169,
+            "km_end": 1211,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 58,
+            "name": "Beat-14",
+            "sector_id": 17,
+            "km_start": 1130,
+            "km_end": 1169,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 59,
+            "name": "Beat-15",
+            "sector_id": 17,
+            "km_start": 1092,
+            "km_end": 1130,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 60,
+            "name": "Beat-16",
+            "sector_id": 17,
+            "km_start": 1045,
+            "km_end": 1092,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 61,
+            "name": "Beat-17",
+            "sector_id": 18,
+            "km_start": 997,
+            "km_end": 1045,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 62,
+            "name": "Beat-18",
+            "sector_id": 18,
+            "km_start": 949,
+            "km_end": 997,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 63,
+            "name": "Beat-19",
+            "sector_id": 18,
+            "km_start": 872,
+            "km_end": 929,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 64,
+            "name": "Beat-20",
+            "sector_id": 18,
+            "km_start": 817,
+            "km_end": 872,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 65,
+            "name": "Beat-21",
+            "sector_id": 19,
+            "km_start": 767,
+            "km_end": 817,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 66,
+            "name": "Beat-22",
+            "sector_id": 19,
+            "km_start": 714,
+            "km_end": 767,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 67,
+            "name": "Beat-23",
+            "sector_id": 19,
+            "km_start": 661,
+            "km_end": 714,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 68,
+            "name": "Beat-24",
+            "sector_id": 19,
+            "km_start": 608,
+            "km_end": 661,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 69,
+            "name": "Beat-25",
+            "sector_id": 20,
+            "km_start": 552,
+            "km_end": 608,
+            "phone": "0723642646",
+            "short_name": "Dharki"
+        },
+        {
+            "id": 70,
+            "name": "Beat-26",
+            "sector_id": 20,
+            "km_start": 486,
+            "km_end": 551,
+            "phone": "0715690349",
+            "short_name": "Panu Aqil"
+        },
+        {
+            "id": 71,
+            "name": "Beat-27",
+            "sector_id": 20,
+            "km_start": 434,
+            "km_end": 485,
+            "phone": "0243771015",
+            "short_name": "Thehri"
+        },
+        {
+            "id": 72,
+            "name": "Beat-28",
+            "sector_id": 20,
+            "km_start": 382,
+            "km_end": 434,
+            "phone": "0243640800",
+            "short_name": "Gambat"
+        },
+        {
+            "id": 73,
+            "name": "Beat-29",
+            "sector_id": 21,
+            "km_start": 328,
+            "km_end": 382,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 74,
+            "name": "Beat-30",
+            "sector_id": 21,
+            "km_start": 270,
+            "km_end": 328,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 75,
+            "name": "Beat-31",
+            "sector_id": 21,
+            "km_start": 212,
+            "km_end": 269,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 76,
+            "name": "Beat-32",
+            "sector_id": 22,
+            "km_start": 162,
+            "km_end": 211,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 77,
+            "name": "Beat-33",
+            "sector_id": 22,
+            "km_start": 114,
+            "km_end": 161,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 78,
+            "name": "Beat-34",
+            "sector_id": 46,
+            "km_start": 62,
+            "km_end": 113,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 79,
+            "name": "Beat-35",
+            "sector_id": 46,
+            "km_start": 16,
+            "km_end": 62,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 80,
+            "name": "Beat-01-LEW",
+            "sector_id": 46,
+            "km_start": 0,
+            "km_end": 15,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 81,
+            "name": "Beat-01",
+            "sector_id": 23,
+            "km_start": 0,
+            "km_end": 58,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 82,
+            "name": "Beat-02",
+            "sector_id": 23,
+            "km_start": 58,
+            "km_end": 108,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 83,
+            "name": "Beat-03",
+            "sector_id": 23,
+            "km_start": 108,
+            "km_end": 162,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 84,
+            "name": "Beat-04",
+            "sector_id": 44,
+            "km_start": 162,
+            "km_end": 215,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 85,
+            "name": "Beat-05",
+            "sector_id": 44,
+            "km_start": 215,
+            "km_end": 270,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 86,
+            "name": "Beat-06",
+            "sector_id": 44,
+            "km_start": 270,
+            "km_end": 328,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 87,
+            "name": "Beat-01",
+            "sector_id": 24,
+            "km_start": 16,
+            "km_end": 66,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 88,
+            "name": "Beat-02",
+            "sector_id": 24,
+            "km_start": 66,
+            "km_end": 116,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 89,
+            "name": "Beat-03",
+            "sector_id": 24,
+            "km_start": 116,
+            "km_end": 166,
+            "short_name": "",
+            "phone": ""
+        },
+        {
+            "id": 90,
+            "name": "Beat-11",
+            "sector_id": 25,
+            "km_start": 516,
+            "km_end": 566,
+            "short_name": "",
+            "phone": ""
+        },
+        {
+            "id": 91,
+            "name": "Beat-12",
+            "sector_id": 25,
+            "km_start": 566,
+            "km_end": 616,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 92,
+            "name": "Beat-13",
+            "sector_id": 25,
+            "km_start": 616,
+            "km_end": 669,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 93,
+            "name": "Beat-14",
+            "sector_id": 25,
+            "km_start": 670,
+            "km_end": 725,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 94,
+            "name": "Beat-01",
+            "sector_id": 26,
+            "km_start": 1660,
+            "km_end": 1691,
+            "phone": "0923580220",
+            "short_name": "Azakhel"
+        },
+        {
+            "id": 95,
+            "name": "Beat-02",
+            "sector_id": 26,
+            "km_start": 1627,
+            "km_end": 1654,
+            "phone": "0923563056",
+            "short_name": "hakimabad"
+        },
+        {
+            "id": 96,
+            "name": "Beat-03",
+            "sector_id": 26,
+            "km_start": 1583,
+            "km_end": 1627,
+            "phone": "0572542766",
+            "short_name": "Kamra"
+        },
+        {
+            "id": 97,
+            "name": "Beat-01",
+            "sector_id": 27,
+            "km_start": 0,
+            "km_end": 50,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 98,
+            "name": "Beat-02",
+            "sector_id": 27,
+            "km_start": 50,
+            "km_end": 99,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 99,
+            "name": "Beat-03-LEBP",
+            "sector_id": 8,
+            "km_start": 0,
+            "km_end": 17,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 100,
+            "name": "Beat-07",
+            "sector_id": 45,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 101,
+            "name": "Beat-03",
+            "sector_id": 27,
+            "km_start": 100,
+            "km_end": 150,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 102,
+            "name": "Beat-04",
+            "sector_id": 27,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 103,
+            "name": "Beat-Jiwani",
+            "sector_id": 26,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 104,
+            "name": "Beat-05",
+            "sector_id": 26,
+            "km_start": 243,
+            "km_end": 293,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 105,
+            "name": "Beat-04",
+            "sector_id": 24,
+            "km_start": 167,
+            "km_end": 216,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 106,
+            "name": "Beat-09",
+            "sector_id": 25,
+            "phone": "",
+            "short_name": ""
+        },
+        {
+            "id": 107,
+            "name": "Beat-10",
+            "sector_id": 25,
+            "phone": "",
+            "short_name": ""
+        }
+    ]
+}

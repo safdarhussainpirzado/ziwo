@@ -1,0 +1,537 @@
+{
+    "1": {
+        "zone": "Motorway North",
+        "sector": "M1",
+        "beat": "Beat-01"
+    },
+    "2": {
+        "zone": "Motorway North",
+        "sector": "M1",
+        "beat": "Beat-02"
+    },
+    "3": {
+        "zone": "Motorway North",
+        "sector": "M1",
+        "beat": "Beat-03"
+    },
+    "4": {
+        "zone": "Motorway North",
+        "sector": "M1",
+        "beat": "Beat-04"
+    },
+    "5": {
+        "zone": "Motorway North",
+        "sector": "M2 North",
+        "beat": "Beat-05"
+    },
+    "6": {
+        "zone": "Motorway North",
+        "sector": "M2 North",
+        "beat": "Beat-06"
+    },
+    "7": {
+        "zone": "Motorway North",
+        "sector": "M2 North",
+        "beat": "Beat-07"
+    },
+    "8": {
+        "zone": "Motorway North",
+        "sector": "M2 North",
+        "beat": "Beat-08"
+    },
+    "9": {
+        "zone": "Motorway North",
+        "sector": "E35",
+        "beat": "Beat-01"
+    },
+    "10": {
+        "zone": "Motorway North",
+        "sector": "E35",
+        "beat": "Beat-02"
+    },
+    "11": {
+        "zone": "Motorway North",
+        "sector": "E35",
+        "beat": "Beat-03"
+    },
+    "12": {
+        "zone": "Motorway North",
+        "sector": "E35",
+        "beat": "Beat-04"
+    },
+    "13": {
+        "zone": "Motorway North",
+        "sector": "Swat Expressway",
+        "beat": "Beat-01"
+    },
+    "14": {
+        "zone": "Motorway North",
+        "sector": "Swat Expressway",
+        "beat": "Beat-02"
+    },
+    "15": {
+        "zone": "Motorway North",
+        "sector": "M14",
+        "beat": "Beat-01"
+    },
+    "16": {
+        "zone": "Motorway North",
+        "sector": "M14",
+        "beat": "Beat-02"
+    },
+    "17": {
+        "zone": "Motorway North",
+        "sector": "M14",
+        "beat": "Beat-03"
+    },
+    "18": {
+        "zone": "Motorway North",
+        "sector": "M14",
+        "beat": "Beat-04"
+    },
+    "19": {
+        "zone": "Motorway North",
+        "sector": "M14",
+        "beat": "Beat-05"
+    },
+    "20": {
+        "zone": "Motorway C-I",
+        "sector": "M2 South",
+        "beat": "Beat-09"
+    },
+    "21": {
+        "zone": "Motorway C-I",
+        "sector": "M2 South",
+        "beat": "Beat-10"
+    },
+    "22": {
+        "zone": "Motorway C-I",
+        "sector": "M2 South",
+        "beat": "Beat-11"
+    },
+    "23": {
+        "zone": "Motorway C-I",
+        "sector": "M2 South",
+        "beat": "Beat-12"
+    },
+    "24": {
+        "zone": "Motorway C-I",
+        "sector": "M3",
+        "beat": "Beat-13"
+    },
+    "25": {
+        "zone": "Motorway C-I",
+        "sector": "M3",
+        "beat": "Beat-14"
+    },
+    "26": {
+        "zone": "Motorway C-I",
+        "sector": "M3",
+        "beat": "Beat-15"
+    },
+    "27": {
+        "zone": "Motorway C-I",
+        "sector": "M3",
+        "beat": "Beat-16"
+    },
+    "28": {
+        "zone": "Motorway C-I",
+        "sector": "LSM",
+        "beat": "Beat-01"
+    },
+    "29": {
+        "zone": "Motorway C-I",
+        "sector": "LSM",
+        "beat": "Beat-02"
+    },
+    "30": {
+        "zone": "Motorway C-II",
+        "sector": "M4",
+        "beat": "Beat-17"
+    },
+    "31": {
+        "zone": "Motorway C-II",
+        "sector": "M4",
+        "beat": "Beat-18"
+    },
+    "32": {
+        "zone": "Motorway C-II",
+        "sector": "M4",
+        "beat": "Beat-19"
+    },
+    "33": {
+        "zone": "Motorway C-II",
+        "sector": "M4",
+        "beat": "Beat-20"
+    },
+    "34": {
+        "zone": "Motorway C-II",
+        "sector": "M4-Sub Sector",
+        "beat": "Beat-21"
+    },
+    "35": {
+        "zone": "Motorway C-II",
+        "sector": "M4-Sub Sector",
+        "beat": "Beat-22"
+    },
+    "36": {
+        "zone": "Motorway C-II",
+        "sector": "M5-1",
+        "beat": "Beat-23"
+    },
+    "37": {
+        "zone": "Motorway C-II",
+        "sector": "M5-1",
+        "beat": "Beat-24"
+    },
+    "38": {
+        "zone": "Motorway C-II",
+        "sector": "M5-1",
+        "beat": "Beat-25"
+    },
+    "39": {
+        "zone": "Motorway C-II",
+        "sector": "M5-1",
+        "beat": "Beat-26"
+    },
+    "40": {
+        "zone": "Motorway C-II",
+        "sector": "M5-2",
+        "beat": "Beat-27"
+    },
+    "41": {
+        "zone": "Motorway C-II",
+        "sector": "M5-2",
+        "beat": "Beat-28"
+    },
+    "42": {
+        "zone": "Motorway C-II",
+        "sector": "M5-2",
+        "beat": "Beat-29"
+    },
+    "43": {
+        "zone": "Motorway C-II",
+        "sector": "M5-2",
+        "beat": "Beat-30"
+    },
+    "44": {
+        "zone": "N5 North",
+        "sector": "North1",
+        "beat": "Beat-01"
+    },
+    "45": {
+        "zone": "N5 North",
+        "sector": "North1",
+        "beat": "Beat-02"
+    },
+    "46": {
+        "zone": "N5 North",
+        "sector": "North1",
+        "beat": "Beat-03"
+    },
+    "47": {
+        "zone": "N5 North",
+        "sector": "North1",
+        "beat": "Beat-04"
+    },
+    "48": {
+        "zone": "N5 North",
+        "sector": "North2",
+        "beat": "Beat-05"
+    },
+    "49": {
+        "zone": "N5 North",
+        "sector": "North2",
+        "beat": "Beat-06"
+    },
+    "50": {
+        "zone": "N5 North",
+        "sector": "North2",
+        "beat": "Beat-07"
+    },
+    "51": {
+        "zone": "N5 North",
+        "sector": "North3",
+        "beat": "Beat-08"
+    },
+    "52": {
+        "zone": "N5 North",
+        "sector": "North3",
+        "beat": "Beat-09"
+    },
+    "53": {
+        "zone": "N5 North",
+        "sector": "North3",
+        "beat": "Beat-10"
+    },
+    "54": {
+        "zone": "N5 North",
+        "sector": "North3",
+        "beat": "Beat-11"
+    },
+    "55": {
+        "zone": "N5 North",
+        "sector": "IMDC",
+        "beat": "Beat-01-IMDC"
+    },
+    "56": {
+        "zone": "N5 Central",
+        "sector": "Central1",
+        "beat": "Beat-12"
+    },
+    "57": {
+        "zone": "N5 Central",
+        "sector": "Central1",
+        "beat": "Beat-13"
+    },
+    "58": {
+        "zone": "N5 Central",
+        "sector": "Central1",
+        "beat": "Beat-14"
+    },
+    "59": {
+        "zone": "N5 Central",
+        "sector": "Central1",
+        "beat": "Beat-15"
+    },
+    "60": {
+        "zone": "N5 Central",
+        "sector": "Central1",
+        "beat": "Beat-16"
+    },
+    "61": {
+        "zone": "N5 Central",
+        "sector": "Central2",
+        "beat": "Beat-17"
+    },
+    "62": {
+        "zone": "N5 Central",
+        "sector": "Central2",
+        "beat": "Beat-18"
+    },
+    "63": {
+        "zone": "N5 Central",
+        "sector": "Central2",
+        "beat": "Beat-19"
+    },
+    "64": {
+        "zone": "N5 Central",
+        "sector": "Central2",
+        "beat": "Beat-20"
+    },
+    "65": {
+        "zone": "N5 Central",
+        "sector": "Central3",
+        "beat": "Beat-21"
+    },
+    "66": {
+        "zone": "N5 Central",
+        "sector": "Central3",
+        "beat": "Beat-22"
+    },
+    "67": {
+        "zone": "N5 Central",
+        "sector": "Central3",
+        "beat": "Beat-23"
+    },
+    "68": {
+        "zone": "N5 Central",
+        "sector": "Central3",
+        "beat": "Beat-24"
+    },
+    "69": {
+        "zone": "N5 South",
+        "sector": "South1",
+        "beat": "Beat-25"
+    },
+    "70": {
+        "zone": "N5 South",
+        "sector": "South1",
+        "beat": "Beat-26"
+    },
+    "71": {
+        "zone": "N5 South",
+        "sector": "South1",
+        "beat": "Beat-27"
+    },
+    "72": {
+        "zone": "N5 South",
+        "sector": "South1",
+        "beat": "Beat-28"
+    },
+    "73": {
+        "zone": "N5 South",
+        "sector": "South2",
+        "beat": "Beat-29"
+    },
+    "74": {
+        "zone": "N5 South",
+        "sector": "South2",
+        "beat": "Beat-30"
+    },
+    "75": {
+        "zone": "N5 South",
+        "sector": "South2",
+        "beat": "Beat-31"
+    },
+    "76": {
+        "zone": "N5 South",
+        "sector": "South3",
+        "beat": "Beat-32"
+    },
+    "77": {
+        "zone": "N5 South",
+        "sector": "South3",
+        "beat": "Beat-33"
+    },
+    "78": {
+        "zone": "N5 South",
+        "sector": "South4",
+        "beat": "Beat-34"
+    },
+    "79": {
+        "zone": "N5 South",
+        "sector": "South4",
+        "beat": "Beat-35"
+    },
+    "80": {
+        "zone": "N5 South",
+        "sector": "South4",
+        "beat": "Beat-01-LEW"
+    },
+    "81": {
+        "zone": "N5 South",
+        "sector": "N55-1",
+        "beat": "Beat-01"
+    },
+    "82": {
+        "zone": "N5 South",
+        "sector": "N55-1",
+        "beat": "Beat-02"
+    },
+    "83": {
+        "zone": "N5 South",
+        "sector": "N55-1",
+        "beat": "Beat-03"
+    },
+    "84": {
+        "zone": "N5 South",
+        "sector": "N55-2",
+        "beat": "Beat-04"
+    },
+    "85": {
+        "zone": "N5 South",
+        "sector": "N55-2",
+        "beat": "Beat-05"
+    },
+    "86": {
+        "zone": "N5 South",
+        "sector": "N55-2",
+        "beat": "Beat-06"
+    },
+    "87": {
+        "zone": "West",
+        "sector": "Sector-I Uthal N-25",
+        "beat": "Beat-01"
+    },
+    "88": {
+        "zone": "West",
+        "sector": "Sector-I Uthal N-25",
+        "beat": "Beat-02"
+    },
+    "89": {
+        "zone": "West",
+        "sector": "Sector-I Uthal N-25",
+        "beat": "Beat-03"
+    },
+    "90": {
+        "zone": "West",
+        "sector": "Sector-III Kalat N-25 ",
+        "beat": "Beat-11"
+    },
+    "91": {
+        "zone": "West",
+        "sector": "Sector-III Kalat N-25 ",
+        "beat": "Beat-12"
+    },
+    "92": {
+        "zone": "West",
+        "sector": "Sector-III Kalat N-25 ",
+        "beat": "Beat-13"
+    },
+    "93": {
+        "zone": "West",
+        "sector": "Sector-III Kalat N-25 ",
+        "beat": "Beat-14"
+    },
+    "94": {
+        "zone": "West",
+        "sector": "N10-Gwadar",
+        "beat": "Beat-01"
+    },
+    "95": {
+        "zone": "West",
+        "sector": "N10-Gwadar",
+        "beat": "Beat-02"
+    },
+    "96": {
+        "zone": "West",
+        "sector": "N10-Gwadar",
+        "beat": "Beat-03"
+    },
+    "97": {
+        "zone": "West",
+        "sector": "N50-QilaSaifullah",
+        "beat": "Beat-01"
+    },
+    "98": {
+        "zone": "West",
+        "sector": "N50-QilaSaifullah",
+        "beat": "Beat-02"
+    },
+    "99": {
+        "zone": "Motorway C-I",
+        "sector": "LSM",
+        "beat": "Beat-03-LEBP"
+    },
+    "100": {
+        "zone": "Motorway North",
+        "sector": "KKH",
+        "beat": "Beat-07"
+    },
+    "101": {
+        "zone": "West",
+        "sector": "N50-QilaSaifullah",
+        "beat": "Beat-03"
+    },
+    "102": {
+        "zone": "West",
+        "sector": "N50-QilaSaifullah",
+        "beat": "Beat-04"
+    },
+    "103": {
+        "zone": "West",
+        "sector": "N10-Gwadar",
+        "beat": "Beat-Jiwani"
+    },
+    "104": {
+        "zone": "West",
+        "sector": "N10-Gwadar",
+        "beat": "Beat-05"
+    },
+    "105": {
+        "zone": "West",
+        "sector": "Sector-I Uthal N-25",
+        "beat": "Beat-04"
+    },
+    "106": {
+        "zone": "West",
+        "sector": "Sector-III Kalat N-25 ",
+        "beat": "Beat-09"
+    },
+    "107": {
+        "zone": "West",
+        "sector": "Sector-III Kalat N-25 ",
+        "beat": "Beat-10"
+    }
+}
