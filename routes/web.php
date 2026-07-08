@@ -116,6 +116,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/unmute', [\App\Http\Controllers\TelephonyController::class, 'unmute'])->name('unmute');
         Route::post('/hangup', [\App\Http\Controllers\TelephonyController::class, 'hangup'])->name('hangup');
         Route::post('/transfer', [\App\Http\Controllers\TelephonyController::class, 'transfer'])->name('transfer');
+        Route::post('/conference', [\App\Http\Controllers\TelephonyController::class, 'conference'])->name('conference');
         Route::post('/recording', [\App\Http\Controllers\TelephonyController::class, 'toggleRecording'])->name('recording');
         
         // Centralized Phonebook

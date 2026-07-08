@@ -46,8 +46,12 @@ interface TelephonyServiceInterface
 
     /**
      * Transfer call to another extension/number.
-     */
     public function transfer(int $userId, string $callId, string $targetNumber, string $type = 'blind'): array;
+
+    /**
+     * Merge call or initiate a conference call.
+     */
+    public function conference(int $userId, string $callId, string $targetNumber): array;
 
     /**
      * Pause or resume active call recording.

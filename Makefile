@@ -51,13 +51,13 @@ sync:
 	@echo "==> Syncing code into app-1 and app-2..."
 	@for container in app-1 app-2; do \
 		echo "  -> $$container: routes..."; \
-		docker cp routes/. 130-$$container-1:/var/www/html/routes/; \
+		docker compose cp routes/. $$container:/var/www/html/routes/; \
 		echo "  -> $$container: app/..."; \
-		docker cp app/. 130-$$container-1:/var/www/html/app/; \
+		docker compose cp app/. $$container:/var/www/html/app/; \
 		echo "  -> $$container: resources/views/..."; \
-		docker cp resources/views/. 130-$$container-1:/var/www/html/resources/views/; \
+		docker compose cp resources/views/. $$container:/var/www/html/resources/views/; \
 		echo "  -> $$container: config/..."; \
-		docker cp config/. 130-$$container-1:/var/www/html/config/; \
+		docker compose cp config/. $$container:/var/www/html/config/; \
 		echo "  [OK] $$container synced"; \
 	done
 	@echo "==> All containers synced!"
@@ -71,7 +71,7 @@ sync_clear: sync
 	docker compose exec app-2 php artisan optimize
 	@echo "==> Syncing build assets to all nodes (app + web)..."
 	@for c in app-1 app-2 web-1 web-2; do \
-		docker cp public/build/. 130-$$c-1:/var/www/html/public/build/ && echo "  [OK] $$c build synced"; \
+		docker compose cp public/build/. $$c:/var/www/html/public/build/ && echo "  [OK] $$c build synced"; \
 	done
 	@echo "==> Done! All nodes are up to date."
 

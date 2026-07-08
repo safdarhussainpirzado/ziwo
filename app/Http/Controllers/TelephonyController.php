@@ -37,29 +37,78 @@ class TelephonyController extends Controller
             $request->input('password')
         );
 
-        return response()->json($result);
+        // Attach contact_center name for frontend SDK initialization
+        if (($result['status'] ?? '') === 'success') {
+            $result['contact_center'] = config('services.ziwo.contact_center', 'nayatel');
+            $result['is_mock'] = (bool)config('services.ziwo.mock', false);
+            return response()->json($result);
+        }
+
+        return response()->json($result, 401);
     }
 
     /**
      * Get active agent configuration and status.
+     * Also returns any currently active/ringing call so the frontend
+     * can show the inbound ringing overlay immediately on next poll.
      */
     public function getStatus()
     {
-        $config = $this->repository->getAgentConfig(auth()->id());
-        if (!$config) {
+        $userId = auth()->id();
+        $config = $this->repository->getAgentConfig($userId);
+
+        if (!$config || empty($config->ziwo_token)) {
             return response()->json([
-                'status' => 'offline',
-                'ziwo_username' => null,
-                'is_authenticated' => false
+                'agent_status'     => 'offline',
+                'ziwo_username'    => null,
+                'is_authenticated' => false,
+                'active_call'      => null,
             ]);
         }
 
+        // Look up the most recent non-terminal call for this agent
+        $activeCall   = $this->repository->getActiveCallForAgent($userId);
+        $agentStatus  = $config->agent_status;
+        $activeCallData = null;
+
+        if ($activeCall) {
+            // Map DB call status → frontend phone status
+            if ($activeCall->status === 'ringing' && $activeCall->direction === 'inbound') {
+                $agentStatus = 'ringing_inbound';
+            } elseif ($activeCall->status === 'ringing' && $activeCall->direction === 'outbound') {
+                $agentStatus = 'ringing';
+            } elseif (in_array($activeCall->status, ['active', 'speaking'])) {
+                $agentStatus = 'speaking';
+            } elseif ($activeCall->status === 'held') {
+                $agentStatus = 'held';
+            }
+
+            $activeCallData = [
+                'id'               => $activeCall->call_id,
+                'uuid'             => $activeCall->call_uuid,
+                'caller_number'    => $activeCall->caller_number,
+                'caller_name'      => $activeCall->metadata['caller_name'] ?? '',
+                'direction'        => $activeCall->direction,
+                'is_held'          => $activeCall->metadata['is_held'] ?? false,
+                'is_muted'         => $activeCall->metadata['is_muted'] ?? false,
+                'recording_paused' => $activeCall->metadata['recording_paused'] ?? false,
+                'seconds_duration' => $activeCall->start_time
+                    ? (int) $activeCall->start_time->diffInSeconds(now())
+                    : 0,
+            ];
+        }
+
         return response()->json([
-            'status' => $config->agent_status,
-            'ziwo_username' => $config->ziwo_username,
-            'is_authenticated' => !empty($config->ziwo_token),
-            'expires_at' => $config->expires_at?->toIso8601String()
+            'agent_status'     => $agentStatus,
+            'ziwo_username'    => $config->ziwo_username,
+            'ziwo_token'       => $config->ziwo_token,  // needed to init SDK on the frontend
+            'contact_center'   => config('services.ziwo.contact_center', 'nayatel'),
+            'is_authenticated' => true,
+            'expires_at'       => $config->expires_at?->toIso8601String(),
+            'active_call'      => $activeCallData,
+            'is_mock'          => (bool)config('services.ziwo.mock', false),
         ]);
+
     }
 
     /**
@@ -73,26 +122,31 @@ class TelephonyController extends Controller
 
     /**
      * Answer incoming call.
+     * Updates call status to 'active' and agent status to 'speaking'.
      */
     public function answer(Request $request)
     {
+        $userId = auth()->id();
         $request->validate(['call_id' => 'required|string']);
-        
+
         $call = $this->repository->getCallByZiwoId($request->input('call_id'));
         if ($call) {
             $dto = new CallLogDTO(
                 callId: $call->call_id,
                 callUuid: $call->call_uuid,
-                agentId: auth()->id(),
+                agentId: $userId,
                 callerNumber: $call->caller_number,
                 direction: $call->direction,
                 status: 'active',
                 startTime: $call->start_time ?? now(),
-                metadata: $call->metadata
+                metadata: array_merge($call->metadata ?? [], ['answered_at' => now()->toIso8601String()])
             );
             $this->repository->logCall($dto);
         }
-        
+
+        // Update agent status so the next poll reflects 'speaking'
+        $this->repository->updateAgentStatus($userId, 'speaking');
+
         return response()->json(['status' => 'success', 'message' => 'Call marked as answered']);
     }
 
@@ -188,6 +242,24 @@ class TelephonyController extends Controller
             $request->input('call_id'),
             $request->input('target_number'),
             $request->input('type', 'blind')
+        );
+        return response()->json($result);
+    }
+
+    /**
+     * Merge or initiate conference call.
+     */
+    public function conference(Request $request)
+    {
+        $request->validate([
+            'call_id' => 'required|string',
+            'target_number' => 'required|string',
+        ]);
+
+        $result = $this->service->conference(
+            auth()->id(),
+            $request->input('call_id'),
+            $request->input('target_number')
         );
         return response()->json($result);
     }

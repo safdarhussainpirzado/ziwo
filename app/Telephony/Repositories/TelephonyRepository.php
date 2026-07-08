@@ -247,4 +247,13 @@ class TelephonyRepository implements TelephonyRepositoryInterface
                 ];
             });
     }
+
+    public function getActiveCallForAgent(int $userId): ?TelephonyCall
+    {
+        return TelephonyCall::where('agent_id', $userId)
+            ->whereIn('status', ['ringing', 'active', 'held'])
+            ->latest()
+            ->first();
+    }
 }
+

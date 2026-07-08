@@ -43,4 +43,6 @@ interface TelephonyRepositoryInterface
     public function getActiveCallsCount(): int;
 
     public function getRecentCalls(int $userId, int $limit = 50): Collection;
+
+    public function getActiveCallForAgent(int $userId): ?TelephonyCall;
 }

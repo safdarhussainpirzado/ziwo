@@ -36,9 +36,10 @@ return [
     ],
 
     'ziwo' => [
-        'base_url' => env('ZIWO_BASE_URL', 'https://api.ziwo.io/v1'),
-        'proxy_url' => env('ZIWO_PROXY_URL', 'https://nayatel-api.aswat.co'),
-        'mock' => env('ZIWO_MOCK', true),
+        'base_url'       => env('ZIWO_BASE_URL', 'https://api.ziwo.io/v1'),
+        'proxy_url'      => env('ZIWO_PROXY_URL', 'https://nayatel-api.aswat.co'),
+        'contact_center' => env('ZIWO_CONTACT_CENTER', 'nayatel'),
+        'mock'           => env('ZIWO_MOCK', false),
     ],
 
 ];

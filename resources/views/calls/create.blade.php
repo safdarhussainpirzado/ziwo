@@ -856,6 +856,9 @@ input:focus, textarea:focus, button:focus-visible {
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button type="button" @click="checkOrRequestMicrophone()" class="text-slate-400 p-1 rounded hover:bg-slate-800 transition" :class="micAllowed === true ? 'text-emerald-500 hover:text-emerald-400' : 'text-amber-500 hover:text-rose-500 animate-pulse'" title="Check Microphone Access">
+                        <i class="fa-solid" :class="micAllowed === true ? 'fa-microphone' : 'fa-microphone-slash'"></i>
+                    </button>
                     <button type="button" @click="phoneDisconnect()" x-show="phoneAuthenticated" class="text-slate-400 hover:text-rose-400 transition" title="Log Out Telephony">
                         <i class="fa-solid fa-power-off text-xs"></i>
                     </button>
@@ -876,6 +879,21 @@ input:focus, textarea:focus, button:focus-visible {
                         <p class="text-[10px] text-slate-500">Authenticate session to enable incoming/outbound calls.</p>
                     </div>
 
+                    <!-- Microphone Permission Banner -->
+                    <div class="text-[10px] space-y-1">
+                        <div x-show="micAllowed === false" class="bg-amber-500/10 border border-amber-500/30 text-amber-400 p-2.5 rounded-xl flex items-center justify-between gap-2">
+                            <span class="leading-tight"><i class="fa-solid fa-microphone-slash mr-1"></i> Mic access blocked. Calls will fail.</span>
+                            <button type="button" @click="checkOrRequestMicrophone()" class="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-[9px] transition shrink-0 cursor-pointer">Allow</button>
+                        </div>
+                        <div x-show="micAllowed === null" class="bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 p-2.5 rounded-xl flex items-center justify-between gap-2">
+                            <span class="leading-tight"><i class="fa-solid fa-circle-info mr-1"></i> Authorize microphone to enable voice calls.</span>
+                            <button type="button" @click="checkOrRequestMicrophone()" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold text-[9px] transition shrink-0 cursor-pointer">Enable</button>
+                        </div>
+                        <div x-show="micAllowed === true" class="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-2 rounded-xl flex items-center gap-1.5">
+                            <i class="fa-solid fa-circle-check text-emerald-500"></i> Microphone fully authorized
+                        </div>
+                    </div>
+
                     <div class="space-y-3">
                         <div>
                             <label class="block text-[8px] font-bold uppercase tracking-wider text-slate-400 mb-1">Username / Email</label>
@@ -884,8 +902,13 @@ input:focus, textarea:focus, button:focus-visible {
                         </div>
                         <div>
                             <label class="block text-[8px] font-bold uppercase tracking-wider text-slate-400 mb-1">Password</label>
-                            <input type="password" x-model="phoneAuthForm.password" placeholder="••••••••" 
-                                   class="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-600 outline-none focus:border-indigo-500">
+                            <div class="relative">
+                                <input :type="showPhonePassword ? 'text' : 'password'" x-model="phoneAuthForm.password" placeholder="••••••••" 
+                                       class="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-600 outline-none focus:border-indigo-500">
+                                <button type="button" @click="showPhonePassword = !showPhonePassword" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 focus:outline-none">
+                                    <i class="fa-solid" :class="showPhonePassword ? 'fa-eye-slash' : 'fa-eye'"></i>
+                                </button>
+                            </div>
                         </div>
                         
                         <div x-show="phoneStatusError" class="text-[9px] text-rose-500 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20" x-text="phoneStatusError"></div>
@@ -900,74 +923,173 @@ input:focus, textarea:focus, button:focus-visible {
 
                 <!-- 2. Active Incoming / Outgoing Call Overlay -->
                 <div x-show="['ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(phoneStatus)"
-                     class="absolute inset-0 z-40 bg-slate-950/98 p-6 flex flex-col justify-between">
+                     class="absolute inset-0 z-40 p-6 flex flex-col justify-between select-none"
+                     :style="['ringing_inbound', 'ringing'].includes(phoneStatus) 
+                        ? 'background: radial-gradient(circle at top, #60a5fa 0%, #2563eb 100%);' 
+                        : 'background: radial-gradient(circle at top, #d946ef 0%, #701a75 100%);'">
                     
-                    <div class="text-center space-y-2 mt-4">
-                        <div class="inline-flex p-4 rounded-full relative"
-                             :class="phoneStatus === 'ringing' || phoneStatus === 'ringing_inbound' ? 'bg-rose-500/10 text-rose-500' : 'bg-indigo-500/10 text-indigo-500'">
-                            <span x-show="phoneStatus === 'ringing' || phoneStatus === 'ringing_inbound'" class="animate-ping absolute inset-0 rounded-full bg-rose-500/20 opacity-70"></span>
-                            <i class="fa-solid fa-phone text-3xl animate-pulse"></i>
+                    <!-- Top row: note icon + close button -->
+                    <div class="flex justify-between items-center shrink-0">
+                        <div x-show="heldParticipants.length > 0" class="flex-1"></div>
+                        <div class="flex-1 flex justify-end">
+                            <button type="button" x-show="['active', 'held', 'speaking'].includes(phoneStatus)"
+                                    @click="if (window.Notification) window.Notification.info('Detailed logging/notes view is active in the main workspace.', 'Note Protocol')" 
+                                    class="text-white/80 hover:text-white transition">
+                                <i class="fa-solid fa-comment-medical text-lg"></i>
+                            </button>
                         </div>
-                        <div>
-                            <h4 class="text-xs uppercase font-black tracking-widest text-slate-500" 
-                                x-text="phoneStatus === 'ringing_inbound' ? 'Incoming Ringing' : phoneStatus === 'ringing' ? 'Dialing Outbound' : 'Connected Session'"></h4>
-                            <p class="text-lg font-extrabold text-white mt-1" x-text="currentCall.caller_number"></p>
-                            <p class="text-xs text-slate-400 italic" x-text="currentCall.caller_name || 'Anonymous Contact'"></p>
-                        </div>
-                        <div class="text-2xl font-mono text-indigo-400 font-semibold pt-2" x-text="formattedCallDuration">00:00</div>
                     </div>
 
-                    <!-- Call Actions grid -->
-                    <div class="space-y-4">
-                        <!-- Mute, Hold, Record, Transfer grid -->
-                        <div class="grid grid-cols-4 gap-2" x-show="['active', 'held', 'speaking'].includes(phoneStatus)">
-                            <!-- Mute button -->
+                    <!-- Held participants banner — tap to switch, × to disconnect -->
+                    <div x-show="heldParticipants.length > 0" class="shrink-0 space-y-1.5">
+                        <template x-for="(p, idx) in heldParticipants" :key="idx">
+                            <div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2 cursor-pointer hover:bg-black/60 transition group"
+                                 @click="switchToHeldCall(p)">
+                                <!-- Resume icon on hover -->
+                                <div class="w-8 h-8 rounded-full bg-white/20 group-hover:bg-emerald-500/60 flex items-center justify-center text-white flex-shrink-0 transition">
+                                    <i class="fa-solid fa-play text-[10px] hidden group-hover:block"></i>
+                                    <i class="fa-solid fa-user text-xs group-hover:hidden"></i>
+                                </div>
+                                <!-- Info -->
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-[11px] font-bold text-white truncate" x-text="p.name"></div>
+                                    <div class="text-[9px] text-white/60">
+                                        <span x-text="p.flag + ' · '"></span>
+                                        <span class="text-amber-300 font-mono" x-text="formatHeldCallDuration(p.duration)"></span>
+                                        <span class="text-white/40"> · tap to resume</span>
+                                    </div>
+                                </div>
+                                <!-- Disconnect held call button -->
+                                <button type="button" @click.stop="hangupHeldCall(p)"
+                                        class="ml-1 w-6 h-6 rounded-full bg-rose-600/70 hover:bg-rose-500 flex items-center justify-center text-white transition flex-shrink-0"
+                                        title="Disconnect this call">
+                                    <i class="fa-solid fa-phone-slash text-[8px]"></i>
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Main screen info -->
+                    <div class="text-center space-y-4 my-auto">
+                        <!-- Subtitle -->
+                        <h4 class="text-sm tracking-wide text-white/90" 
+                            x-text="['ringing_inbound', 'ringing'].includes(phoneStatus) 
+                                ? (phoneStatus === 'ringing' ? 'Outbound Call' : 'Inbound Call') 
+                                : (currentCall.direction === 'outbound' ? 'On Outbound Call to' : 'On Inbound Call from')"></h4>
+                        
+                        <!-- Caller Number & Label -->
+                        <h2 class="text-xl font-extrabold text-white tracking-tight" 
+                            x-text="currentCall.caller_number + (currentCall.caller_name && currentCall.caller_name.trim() !== '' && currentCall.caller_name.replace(/\D/g,'') !== currentCall.caller_number.replace(/\D/g,'') ? ' - ' + currentCall.caller_name : '')"></h2>
+                        
+                        <!-- Flag + Time pill -->
+                        <div class="inline-flex items-center gap-1.5 bg-black/30 border border-white/10 rounded-full px-3.5 py-1 text-[11px] text-white">
+                            <span x-text="getCountryFlagAndLocalTime(currentCall.caller_number).code + ' ' + getCountryFlagAndLocalTime(currentCall.caller_number).flag"></span>
+                            <span class="font-extrabold" x-text="getCountryFlagAndLocalTime(currentCall.caller_number).time"></span>
+                            <span class="opacity-80">local time</span>
+                        </div>
+
+                        <!-- Silhouette Avatar -->
+                        <div class="my-6">
+                            <div class="mx-auto w-24 h-24 rounded-full border-4 border-white/80 overflow-hidden bg-gradient-to-b from-blue-300 to-blue-500 shadow-xl flex items-center justify-center">
+                                <svg class="w-16 h-16 text-white translate-y-2" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"></path>
+                                </svg>
+                            </div>
+                        </div>
+
+                        <!-- Timer (speaking) or Ringing status -->
+                        <div class="text-xl font-semibold text-white">
+                            <template x-if="['ringing_inbound', 'ringing'].includes(phoneStatus)">
+                                <span class="animate-pulse">Ringing</span>
+                            </template>
+                            <template x-if="['active', 'held', 'speaking'].includes(phoneStatus)">
+                                <span class="font-mono tracking-wider font-extrabold" x-text="formattedCallDuration">00:00:00</span>
+                            </template>
+                        </div>
+                        
+                        <!-- Clear/Reset Button for recovery of stuck screens -->
+                        <div class="flex justify-center mt-2">
+                            <button type="button" @click="phoneResetUI()" 
+                                    class="text-[9px] text-white/20 hover:text-white/60 transition bg-white/5 px-2.5 py-1 rounded-md border border-white/10">
+                                Reset Softphone
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Call Actions grid / buttons -->
+                    <div class="shrink-0 space-y-6">
+                        <!-- Six buttons call options layout (Only on attended call screen) -->
+                        <div class="grid grid-cols-3 gap-y-4 gap-x-2 justify-items-center" x-show="['active', 'held', 'speaking'].includes(phoneStatus)">
+                            <!-- Mute -->
                             <button type="button" @click="currentCall.is_muted ? phoneUnmute() : phoneMute()"
-                                    class="py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition active:scale-95 flex flex-col items-center gap-1 cursor-pointer">
-                                <i class="fa-solid text-xs" :class="currentCall.is_muted ? 'fa-microphone-slash text-rose-500' : 'fa-microphone text-slate-400'"></i>
-                                <span class="text-[8px] font-bold uppercase tracking-wider text-slate-500" x-text="currentCall.is_muted ? 'Muted' : 'Mute'"></span>
+                                    class="flex flex-col items-center gap-1.5 bg-transparent hover:bg-white/10 p-2 rounded-xl transition duration-150 cursor-pointer w-20">
+                                <div class="w-11 h-11 rounded-full flex items-center justify-center border transition-colors duration-200"
+                                     :class="currentCall.is_muted ? 'border-rose-400 bg-rose-500 text-white' : 'border-white/20 bg-white/5 text-white'">
+                                    <i class="fa-solid text-base" :class="currentCall.is_muted ? 'fa-microphone-slash' : 'fa-microphone'"></i>
+                                </div>
+                                <span class="text-[10px] font-bold tracking-wider text-white/95" x-text="currentCall.is_muted ? 'Muted' : 'Mute'"></span>
                             </button>
 
-                            <!-- Hold button -->
+                            <!-- Hold -->
                             <button type="button" @click="currentCall.is_held ? phoneResume() : phoneHold()"
-                                    class="py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition active:scale-95 flex flex-col items-center gap-1 cursor-pointer">
-                                <i class="fa-solid text-xs" :class="currentCall.is_held ? 'fa-play text-emerald-500' : 'fa-pause text-slate-400'"></i>
-                                <span class="text-[8px] font-bold uppercase tracking-wider text-slate-500" x-text="currentCall.is_held ? 'Resume' : 'Hold'"></span>
+                                    class="flex flex-col items-center gap-1.5 bg-transparent hover:bg-white/10 p-2 rounded-xl transition duration-150 cursor-pointer w-20">
+                                <div class="w-11 h-11 rounded-full flex items-center justify-center border transition-colors duration-200"
+                                     :class="currentCall.is_held ? 'border-amber-400 bg-amber-500 text-white' : 'border-white/20 bg-white/5 text-white'">
+                                    <i class="fa-solid text-base" :class="currentCall.is_held ? 'fa-play' : 'fa-pause'"></i>
+                                </div>
+                                <span class="text-[10px] font-bold tracking-wider text-white/95" x-text="currentCall.is_held ? 'Resume' : 'Hold'"></span>
                             </button>
 
-                            <!-- Record button -->
-                            <button type="button" @click="phoneToggleRecording()"
-                                    class="py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition active:scale-95 flex flex-col items-center gap-1 cursor-pointer">
-                                <i class="fa-solid fa-circle text-xs" :class="currentCall.recording_paused ? 'text-slate-500' : 'text-rose-600 animate-pulse'"></i>
-                                <span class="text-[8px] font-bold uppercase tracking-wider text-slate-500" x-text="currentCall.recording_paused ? 'Record' : 'Rec ON'"></span>
+                            <!-- Keypad -->
+                            <button type="button" @click="keypadPanelOpen = true"
+                                    class="flex flex-col items-center gap-1.5 bg-transparent hover:bg-white/10 p-2 rounded-xl transition duration-150 cursor-pointer w-20">
+                                <div class="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-white/5 text-white">
+                                    <i class="fa-solid fa-table-cells text-base"></i>
+                                </div>
+                                <span class="text-[10px] font-bold tracking-wider text-white/95">Keypad</span>
                             </button>
 
-                            <!-- Transfer button -->
+                            <!-- Transfer -->
                             <button type="button" @click="openInlineTransfer()"
-                                    class="py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition active:scale-95 flex flex-col items-center gap-1 cursor-pointer">
-                                <i class="fa-solid fa-share-from-square text-xs text-slate-400"></i>
-                                <span class="text-[8px] font-bold uppercase tracking-wider text-slate-500">Transfer</span>
+                                    class="flex flex-col items-center gap-1.5 bg-transparent hover:bg-white/10 p-2 rounded-xl transition duration-150 cursor-pointer w-20">
+                                <div class="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-white/5 text-white">
+                                    <i class="fa-solid fa-share-nodes text-base"></i>
+                                </div>
+                                <span class="text-[10px] font-bold tracking-wider text-white/95">Transfer</span>
+                            </button>
+
+                            <!-- Add Call (Conference) -->
+                            <button type="button" @click="openAddOrCallPanel()"
+                                    class="flex flex-col items-center gap-1.5 bg-transparent hover:bg-white/10 p-2 rounded-xl transition duration-150 cursor-pointer w-20">
+                                <div class="w-11 h-11 rounded-full flex items-center justify-center border border-white/20 bg-white/5 text-white">
+                                    <i class="fa-solid fa-user-plus text-base"></i>
+                                </div>
+                                <span class="text-[10px] font-bold tracking-wider text-white/95">Add Call</span>
                             </button>
                         </div>
 
-                        <!-- Main call control (Answer / Reject / Hangup) -->
-                        <div class="flex gap-4">
-                            <!-- Answer button (Incoming only) -->
-                            <button type="button" @click="phoneAnswer()" x-show="phoneStatus === 'ringing_inbound'"
-                                    class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
-                                <i class="fa-solid fa-phone text-sm"></i> Accept
-                            </button>
+                        <!-- Main call controls -->
+                        <div class="flex justify-center mt-4">
+                            <!-- Inbound ringing: Green Answer/Accept button at bottom center -->
+                            <template x-if="phoneStatus === 'ringing_inbound'">
+                                <button type="button" @click="phoneAnswer()"
+                                        class="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white flex items-center justify-center transition-all duration-200 shadow-lg shadow-emerald-500/30 cursor-pointer">
+                                    <i class="fa-solid fa-phone text-xl"></i>
+                                </button>
+                            </template>
 
-                            <!-- Hang Up / Decline button -->
-                            <button type="button" @click="phoneHangup()"
-                                    class="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-2xl transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer">
-                                <i class="fa-solid fa-phone-slash text-sm"></i> Hang Up
-                            </button>
+                            <!-- Attended call / Outbound Ringing: Red Hang Up button at bottom center -->
+                            <template x-if="['active', 'held', 'speaking', 'ringing', 'ringing_inbound'].includes(phoneStatus)">
+                                <button type="button" @click="phoneHangup()"
+                                        class="w-14 h-14 rounded-full bg-rose-600 hover:bg-rose-500 active:scale-95 text-white flex items-center justify-center transition-all duration-200 shadow-lg shadow-rose-600/30 cursor-pointer">
+                                    <i class="fa-solid fa-phone-slash text-xl animate-pulse"></i>
+                                </button>
+                            </template>
                         </div>
                     </div>
 
                     <!-- Inline Transfer Panel Overlay -->
-                    <div x-show="transferPanelOpen" class="absolute inset-0 bg-slate-950/98 p-6 flex flex-col justify-center gap-4 z-50">
+                    <div x-show="transferPanelOpen" class="absolute inset-0 bg-slate-950/98 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
                         <div class="text-center">
                             <i class="fa-solid fa-share-nodes text-indigo-500 text-2xl mb-1"></i>
                             <h5 class="font-bold text-xs text-slate-200">Call Transfer Protocol</h5>
@@ -982,6 +1104,241 @@ input:focus, textarea:focus, button:focus-visible {
                                 <button type="button" @click="phoneExecuteTransfer('warm')" class="py-2 bg-indigo-50/10 text-slate-300 text-[10px] font-bold border border-slate-800 rounded-lg hover:bg-slate-900 transition active:scale-95">Attended</button>
                             </div>
                             <button type="button" @click="transferPanelOpen = false" class="w-full py-1.5 text-slate-500 hover:text-slate-300 text-[10px] font-bold transition">Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- ════════════════════════════════════
+                         Add or Call Panel (full-screen overlay)
+                         ════════════════════════════════════ -->
+                    <div x-show="addOrCallOpen"
+                         x-transition:enter="transition ease-out duration-200"
+                         x-transition:enter-start="opacity-0 translate-y-2"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         class="absolute inset-0 z-50 flex flex-col rounded-2xl overflow-hidden"
+                         style="background: #0f172a;">
+
+                        <!-- Header -->
+                        <div class="flex items-center px-4 pt-4 pb-2 shrink-0">
+                            <!-- Back arrow (shown only when country picker is open) -->
+                            <button type="button" x-show="addOrCallCountryPickerOpen" @click="addOrCallCountryPickerOpen = false"
+                                    class="mr-2 text-slate-400 hover:text-white transition">
+                                <i class="fa-solid fa-arrow-left text-sm"></i>
+                            </button>
+                            <h5 class="flex-1 font-bold text-sm text-white" 
+                                x-text="addOrCallCountryPickerOpen ? 'Select a Country' : 'Add or Call'"></h5>
+                            <button type="button" @click="closeAddOrCallPanel()"
+                                    class="text-slate-400 hover:text-white transition ml-2">
+                                <i class="fa-solid fa-xmark text-base"></i>
+                            </button>
+                        </div>
+
+                        <!-- ── COUNTRY PICKER VIEW ── -->
+                        <template x-if="addOrCallCountryPickerOpen">
+                            <div class="flex flex-col flex-1 overflow-hidden">
+                                <!-- Search bar -->
+                                <div class="px-3 pb-2 shrink-0">
+                                    <div class="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2">
+                                        <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs"></i>
+                                        <input type="text" x-model="addOrCallSearch" placeholder="Search country..."
+                                               class="bg-transparent flex-1 text-xs text-white placeholder-slate-500 outline-none">
+                                    </div>
+                                </div>
+                                <!-- Country list -->
+                                <div class="flex-1 overflow-y-auto px-2 pb-4">
+                                    <template x-for="c in filteredCountries" :key="c.code">
+                                        <button type="button" @click="selectAddOrCallCountry(c)"
+                                                class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 transition cursor-pointer border-b border-slate-800/50">
+                                            <span class="text-xl leading-none" x-text="c.flag"></span>
+                                            <div class="flex-1 text-left min-w-0">
+                                                <div class="text-xs font-semibold text-slate-200 truncate" x-text="c.name"></div>
+                                                <div class="text-[10px] text-slate-500" x-text="'+' + c.dial"></div>
+                                            </div>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- ── MAIN VIEW (Tabs + Search + Lists) ── -->
+                        <template x-if="!addOrCallCountryPickerOpen">
+                            <div class="flex flex-col flex-1 overflow-hidden">
+
+                                <!-- Tabs -->
+                                <div class="flex border-b border-slate-700/50 px-4 shrink-0">
+                                    <button type="button" @click="addOrCallTab='phonebook'"
+                                            :class="addOrCallTab==='phonebook' ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                            class="text-[11px] font-bold px-3 py-2 transition">
+                                        PhoneBook
+                                    </button>
+                                    <button type="button" @click="addOrCallTab='teammates'"
+                                            :class="addOrCallTab==='teammates' ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                            class="text-[11px] font-bold px-3 py-2 transition">
+                                        Teammates
+                                    </button>
+                                    <button type="button" @click="addOrCallTab='queues'"
+                                            :class="addOrCallTab==='queues' ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                            class="text-[11px] font-bold px-3 py-2 transition">
+                                        Queues
+                                    </button>
+                                    <!-- Dialpad toggle -->
+                                    <button type="button" @click="addOrCallDialpadOpen = !addOrCallDialpadOpen"
+                                            :class="addOrCallDialpadOpen ? 'text-fuchsia-400' : 'text-slate-400 hover:text-slate-200'"
+                                            class="ml-auto text-[11px] font-bold py-2 px-2 transition">
+                                        <i class="fa-solid fa-table-cells-large text-base"></i>
+                                    </button>
+                                </div>
+
+                                <!-- Search bar (list mode) -->
+                                <div x-show="!addOrCallDialpadOpen" class="px-3 pt-3 pb-1 shrink-0">
+                                    <div class="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2">
+                                        <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs"></i>
+                                        <input type="text" x-model="addOrCallSearch" placeholder="Search..."
+                                               class="bg-transparent flex-1 text-xs text-white placeholder-slate-500 outline-none">
+                                    </div>
+                                </div>
+
+                                <!-- ── DIALPAD VIEW ── -->
+                                <div x-show="addOrCallDialpadOpen" class="flex flex-col items-center px-4 pt-3 pb-2 gap-3">
+                                    <!-- Number display with flag/country -->
+                                    <div class="w-full flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2">
+                                        <!-- Flag button (opens country picker) -->
+                                        <button type="button" @click="addOrCallSearch=''; addOrCallCountryPickerOpen = true"
+                                                class="flex items-center gap-1.5 shrink-0 hover:opacity-80 transition">
+                                            <span class="text-xl leading-none" x-text="addOrCallSelectedCountry.flag"></span>
+                                            <span class="text-[10px] text-slate-300 font-bold" x-text="addOrCallSelectedCountry.code"></span>
+                                            <i class="fa-solid fa-chevron-down text-[8px] text-slate-500"></i>
+                                        </button>
+                                        <div class="w-px h-5 bg-slate-700"></div>
+                                        <!-- Number -->
+                                        <div class="flex-1 font-mono text-sm text-white tracking-widest truncate" x-text="addOrCallInput || ''"></div>
+                                        <!-- Backspace -->
+                                        <button type="button" @click="addOrCallKeypad('backspace')" class="text-slate-400 hover:text-white transition ml-1">
+                                            <i class="fa-solid fa-delete-left text-sm"></i>
+                                        </button>
+                                    </div>
+
+                                    <!-- Keypad grid -->
+                                    <div class="grid grid-cols-3 gap-2 w-full">
+                                        <template x-for="k in ['1','2','3','4','5','6','7','8','9','*','0','#']">
+                                            <button type="button" @click="addOrCallKeypad(k)"
+                                                    class="h-11 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-white font-mono font-bold text-sm transition active:scale-90 cursor-pointer">
+                                                <span x-text="k"></span>
+                                            </button>
+                                        </template>
+                                    </div>
+
+                                    <!-- Add to the call CTA -->
+                                    <button type="button"
+                                            @click="executeAddToCall(addOrCallInput, addOrCallInput)"
+                                            :disabled="addOrCallInput.length < 4"
+                                            class="w-full py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded-xl transition active:scale-95">
+                                        Add to the call
+                                    </button>
+                                </div>
+
+                                <!-- ── LIST VIEWS ── -->
+                                <div x-show="!addOrCallDialpadOpen" class="flex-1 overflow-y-auto px-2 pb-4">
+
+                                    <!-- PhoneBook tab -->
+                                    <template x-if="addOrCallTab === 'phonebook'">
+                                        <div>
+                                            <template x-if="filteredPhonebook.length === 0">
+                                                <div class="flex flex-col items-center justify-center py-12 text-center">
+                                                    <div class="text-5xl mb-3">💬</div>
+                                                    <div class="text-xs font-bold text-slate-300">We couldn't find any results</div>
+                                                    <div class="text-[10px] text-slate-500 mt-1">Try a different keyword</div>
+                                                </div>
+                                            </template>
+                                            <template x-for="contact in filteredPhonebook" :key="contact.id">
+                                                <button type="button" @click="executeAddToCall(contact.phone_number, contact.name)"
+                                                        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 transition cursor-pointer border-b border-slate-800/50">
+                                                    <div class="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-white shrink-0">
+                                                        <i class="fa-solid fa-user text-xs"></i>
+                                                    </div>
+                                                    <div class="flex-1 text-left min-w-0">
+                                                        <div class="text-xs font-semibold text-slate-200 truncate" x-text="contact.name"></div>
+                                                        <div class="text-[10px] text-slate-500 truncate">
+                                                            <span x-text="getCountryFlagAndLocalTime(contact.phone_number).flag"></span>
+                                                            <span class="ml-1" x-text="contact.phone_number"></span>
+                                                        </div>
+                                                    </div>
+                                                    <i class="fa-solid fa-phone text-fuchsia-400 text-xs shrink-0"></i>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </template>
+
+                                    <!-- Teammates tab -->
+                                    <template x-if="addOrCallTab === 'teammates'">
+                                        <div>
+                                            <template x-for="t in filteredTeammates" :key="t.id">
+                                                <button type="button" @click="executeAddToCall(t.number, t.name)"
+                                                        :disabled="t.status === 'offline'"
+                                                        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer border-b border-slate-800/50">
+                                                    <!-- Avatar -->
+                                                    <div class="relative shrink-0">
+                                                        <div class="w-9 h-9 rounded-full bg-indigo-700 flex items-center justify-center text-white font-bold text-xs" x-text="t.name.charAt(0)"></div>
+                                                        <!-- Status dot -->
+                                                        <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900"
+                                                             :class="t.status === 'online' ? 'bg-emerald-400' : t.status === 'busy' ? 'bg-amber-400' : 'bg-slate-500'"></div>
+                                                    </div>
+                                                    <div class="flex-1 text-left min-w-0">
+                                                        <div class="text-xs font-semibold text-slate-200 truncate" x-text="t.name"></div>
+                                                        <div class="text-[10px] text-slate-500" x-text="'Ext. ' + t.ext + ' · ' + t.status.charAt(0).toUpperCase() + t.status.slice(1)"></div>
+                                                    </div>
+                                                    <i x-show="t.status !== 'offline'" class="fa-solid fa-phone text-fuchsia-400 text-xs shrink-0"></i>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </template>
+
+                                    <!-- Queues tab -->
+                                    <template x-if="addOrCallTab === 'queues'">
+                                        <div>
+                                            <template x-for="q in filteredQueues" :key="q.id">
+                                                <button type="button" @click="executeAddToCall(q.number, q.name + ' Queue')"
+                                                        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 transition cursor-pointer border-b border-slate-800/50">
+                                                    <div class="w-9 h-9 rounded-full bg-violet-700 flex items-center justify-center text-white shrink-0">
+                                                        <i class="fa-solid fa-headset text-xs"></i>
+                                                    </div>
+                                                    <div class="flex-1 text-left min-w-0">
+                                                        <div class="text-xs font-semibold text-slate-200 truncate" x-text="q.name"></div>
+                                                        <div class="text-[10px] text-slate-500" x-text="q.agents + ' agents · ' + q.waiting + ' waiting'"></div>
+                                                    </div>
+                                                    <i class="fa-solid fa-phone text-fuchsia-400 text-xs shrink-0"></i>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </template>
+
+                                </div>
+                            </div>
+                        </template>
+
+                    </div>
+
+                    <!-- Inline Keypad Panel Overlay -->
+                    <div x-show="keypadPanelOpen" class="absolute inset-0 bg-slate-950/98 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
+                        <div class="text-center">
+                            <i class="fa-solid fa-table-cells text-indigo-500 text-2xl mb-1"></i>
+                            <h5 class="font-bold text-xs text-slate-200">Keypad / DTMF</h5>
+                            <p class="text-[9px] text-slate-500">Send tones during the call.</p>
+                        </div>
+                        
+                        <div class="text-center bg-slate-900 border border-slate-800 rounded-xl py-2 text-white font-mono text-base tracking-widest min-h-[38px]" x-text="dtmfInput || ' '"></div>
+
+                        <div class="grid grid-cols-3 gap-2 px-6">
+                            <template x-for="k in ['1','2','3','4','5','6','7','8','9','*','0','#']">
+                                <button type="button" @click="dtmfInput += k; sendDTMF(k)"
+                                        class="h-10 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:text-white transition active:scale-90 flex items-center justify-center font-mono font-bold text-sm text-slate-300 cursor-pointer">
+                                    <span x-text="k"></span>
+                                </button>
+                            </template>
+                        </div>
+                        
+                        <div class="flex gap-2 justify-center mt-2">
+                            <button type="button" @click="dtmfInput = ''" class="px-3 py-1 bg-slate-800 text-[10px] text-slate-300 rounded-lg hover:bg-slate-700 font-bold transition">Clear</button>
+                            <button type="button" @click="keypadPanelOpen = false" class="px-3 py-1 bg-indigo-600 text-[10px] text-white rounded-lg hover:bg-indigo-500 font-bold transition">Close</button>
                         </div>
                     </div>
                 </div>
@@ -1005,7 +1362,10 @@ input:focus, textarea:focus, button:focus-visible {
                             <!-- Display -->
                             <div class="relative flex items-center bg-slate-900/80 rounded-2xl border border-slate-850 px-3 py-2.5">
                                 <i class="fa-solid fa-phone text-xs text-indigo-500 mr-2"></i>
-                                <input type="text" x-model="dialNumberInput" placeholder="Enter phone number..." readonly
+                                <input type="text" id="dialer-input" x-model="dialNumberInput"
+                                       placeholder="Enter phone number..."
+                                       @keydown="handleDialerKey($event)"
+                                       @keyup.enter="if (dialNumberInput.length >= 3) phoneDial()"
                                        class="flex-1 bg-transparent text-sm font-semibold tracking-wide text-white outline-none">
                                 <button type="button" @click="dialNumberInput = dialNumberInput.slice(0,-1)" x-show="dialNumberInput.length > 0" class="text-slate-400 hover:text-slate-200 p-1">
                                     <i class="fa-solid fa-backspace"></i>
@@ -1154,9 +1514,22 @@ input:focus, textarea:focus, button:focus-visible {
 
     </div>
 </div>
+
+<!-- ZIWO Inbound Ringtone (official ZIWO ringtone, looped) -->
+<audio id="ring-audio" src="https://static.ziwo.io/audio/ringtone.mp3" loop preload="auto" style="display:none"></audio>
+
+<!-- ZIWO End Call Notification (official ZIWO end call tone) -->
+<audio id="end-call-audio" src="https://static.ziwo.io/audio/end_call_notification.mp3" preload="auto" style="display:none"></audio>
+
+<!-- ZIWO WebRTC Audio stream (required by ziwo-core-front SDK — binds the call audio) -->
+<audio id="ziwo-peer-audio" autoplay playsinline style="display:none"></audio>
+
 @endsection
 
 @push('scripts')
+{{-- ZIWO Core Frontend SDK (WebSocket/Verto — powers real-time call events) --}}
+<script src="https://cdn.jsdelivr.net/npm/ziwo-core-front@1.0.13/dist/ziwo-core-front.umd.js"></script>
+
 <script>
 function intakeComponent() {
     return {
@@ -1217,8 +1590,15 @@ function intakeComponent() {
         phoneSubmitting: false,
         phoneStatus: 'offline', // offline, online, ringing, speaking, active, held, ringing_inbound
         phoneStatusError: '',
+        showPhonePassword: false,
+        isMockMode: false,
+        micAllowed: null,
         dialNumberInput: '',
         ziwoUsername: '',
+        ziwoToken: null,              // Real ZIWO access_token from backend
+        ziwoContactCenter: 'nayatel', // Contact center name for SDK
+        ziwoSdkClient: null,          // ziwo-core-front ZiwoClient instance
+        ziwoActiveCalls: {},          // Live call objects from SDK, keyed by callId
         phoneAuthForm: {
             username: '',
             password: ''
@@ -1244,6 +1624,42 @@ function intakeComponent() {
         // Transfer Panel Overlay
         transferPanelOpen: false,
         transferNumber: '',
+
+        // Keypad Panel Overlay
+        keypadPanelOpen: false,
+        dtmfInput: '',
+
+        // ─── Add or Call Panel (Conference / Add Participant) ───
+        addOrCallOpen: false,
+        addOrCallTab: 'phonebook',   // 'phonebook' | 'teammates' | 'queues'
+        addOrCallSearch: '',
+        addOrCallDialpadOpen: false, // show numeric dialpad inside panel
+        addOrCallInput: '',          // typed number in panel dialpad
+        addOrCallCountryPickerOpen: false, // flag/country picker
+        addOrCallSelectedCountry: { name: 'Pakistan', flag: '🇵🇰', dial: '+92', code: 'PK' },
+
+        // Held-call participants (previous callers put on hold for conference)
+        heldParticipants: [],  // [{number, name, flag, duration, direction, heldAt, id}]
+
+        // Flag to suppress ziwo-requesting/held events during SDK-internal resume cycles
+        isConferenceResuming: false,
+
+        // Conference merged participants once connected
+        conferenceParticipants: [], // [{number, name, flag, duration}]
+
+        mockTeammates: [
+            { id: 1, name: 'Safdar Hussain',  ext: '101', status: 'online',  number: '+921000000101' },
+            { id: 2, name: 'Ahmed Raza',       ext: '102', status: 'online',  number: '+921000000102' },
+            { id: 3, name: 'Sara Khan',        ext: '103', status: 'busy',    number: '+921000000103' },
+            { id: 4, name: 'John Carter',      ext: '104', status: 'offline', number: '+921000000104' },
+            { id: 5, name: 'Maria Lopez',      ext: '105', status: 'online',  number: '+921000000105' },
+        ],
+        mockQueues: [
+            { id: 1, name: 'Support',   number: '3001', agents: 5, waiting: 2 },
+            { id: 2, name: 'Sales',     number: '3002', agents: 3, waiting: 0 },
+            { id: 3, name: 'Dispatch',  number: '3003', agents: 4, waiting: 1 },
+            { id: 4, name: 'Billing',   number: '3004', agents: 2, waiting: 3 },
+        ],
 
         // Add Contact Modal Overlay
         addContactOpen: false,
@@ -1679,13 +2095,25 @@ function intakeComponent() {
         phonePollInterval: null,
 
         async phoneInit() {
-            // Check current session status
-            await this.phoneCheckStatus();
-            
-            // Start regular status polling
-            this.phonePollInterval = setInterval(() => this.phoneCheckStatus(), 3000);
+            // Check microphone permission status initially
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                if (navigator.permissions && navigator.permissions.query) {
+                    navigator.permissions.query({ name: 'microphone' }).then(res => {
+                        this.micAllowed = res.state === 'granted';
+                        res.onchange = () => { this.micAllowed = res.state === 'granted'; }
+                    }).catch(() => {
+                        this.micAllowed = null;
+                    });
+                }
+            }
 
-            // Listen to Laravel Echo if available
+            // Check current session status (and grab token for SDK init if already logged in)
+            await this.phoneCheckStatus();
+
+            // Polling is now just a keepalive/fallback — SDK handles real-time events
+            this.phonePollInterval = setInterval(() => this.phoneCheckStatus(), 30000);
+
+            // Listen to Laravel Echo if available (secondary channel)
             if (window.Echo) {
                 window.Echo.channel('telephony')
                     .listen('.CallStatusUpdated', (e) => {
@@ -1697,9 +2125,49 @@ function intakeComponent() {
             }
         },
 
+        async checkOrRequestMicrophone() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                this.phoneStatusError = 'Microphone API not supported by browser/HTTP context.';
+                this.micAllowed = false;
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(t => t.stop());
+                this.micAllowed = true;
+                this.phoneStatusError = '';
+            } catch (err) {
+                this.micAllowed = false;
+                this.phoneStatusError = 'Microphone access denied. Please allow microphone in browser settings.';
+            }
+        },
+
         phoneCleanup() {
             if (this.phonePollInterval) clearInterval(this.phonePollInterval);
             if (this.callDurationInterval) clearInterval(this.callDurationInterval);
+            this.stopRinging();
+        },
+
+        phoneResetUI() {
+            console.log('[Softphone] Manually resetting softphone UI state');
+            this.phoneStatus = 'online';
+            this.stopCallTimer();
+            this.stopRinging();
+            this.ziwoActiveCalls = {};
+            this.heldParticipants = [];
+            this.currentCall = {
+                id: null,
+                uuid: null,
+                caller_number: '',
+                caller_name: '',
+                is_held: false,
+                is_muted: false,
+                recording_paused: false,
+                duration: 0
+            };
+            this.transferPanelOpen = false;
+            this.addOrCallOpen = false;
+            this.keypadPanelOpen = false;
         },
 
         async phoneCheckStatus() {
@@ -1707,58 +2175,80 @@ function intakeComponent() {
                 const res = await fetch('/telephony/status');
                 if (!res.ok) return;
                 const data = await res.json();
-                
+
                 this.phoneAuthenticated = data.is_authenticated;
                 this.ziwoUsername = data.ziwo_username || '';
-                
-                // If agent logged in/out on another page, update local state
+                this.isMockMode = data.is_mock || false;
+
+                // ── Token / SDK init (runs once on page-load or re-auth) ──
+                if (data.ziwo_token && !this.ziwoToken) {
+                    this.ziwoToken = data.ziwo_token;
+                    this.ziwoContactCenter = data.contact_center || 'nayatel';
+                    if (data.is_authenticated && !this.ziwoSdkInitialized) {
+                        this.$nextTick(() => this.initZiwoSdk());
+                    }
+                }
+
+                // If agent is logged out, always update
                 if (!this.phoneAuthenticated) {
                     if (this.phoneStatus !== 'offline') {
                         this.phoneStatus = 'offline';
                         this.stopCallTimer();
+                        this.stopRinging();
                     }
                     return;
                 }
 
-                // If agent status has changed
-                if (data.agent_status && this.phoneStatus !== data.agent_status) {
-                    this.phoneStatus = data.agent_status;
+                // ─────────────────────────────────────────────────────────
+                // SDK MODE: poller is auth-only. NEVER touch phoneStatus/currentCall.
+                // All call state is owned exclusively by the SDK's real-time events
+                // (ziwo-requesting, ziwo-active, ziwo-hangup, etc.).
+                // The backend's /status endpoint does NOT track WebRTC calls placed
+                // directly from the browser, so data.active_call is always null here.
+                // Treating that null as "call ended" caused the phantom reset loop.
+                // ─────────────────────────────────────────────────────────
+                if (!this.isMockMode) {
+                    if (this.phoneAuthenticated && this.phoneStatus === 'offline') {
+                        this.phoneStatus = 'online';
+                    }
+                    return; // SDK events own all call state — poller stays silent
                 }
 
-                // Process active call state if any
+                // ── MOCK MODE: backend fully tracks call state ──
+                const newStatus = data.agent_status || 'online';
+                const uiIsInCall = ['ringing', 'ringing_inbound', 'speaking', 'held'].includes(this.phoneStatus);
+
                 if (data.active_call) {
-                    const call = data.active_call;
-                    this.currentCall.id = call.id;
-                    this.currentCall.uuid = call.uuid;
-                    this.currentCall.caller_number = call.caller_number;
-                    this.currentCall.caller_name = call.caller_name || '';
-                    this.currentCall.is_held = call.is_held || false;
-                    this.currentCall.is_muted = call.is_muted || false;
-                    this.currentCall.recording_paused = call.recording_paused || false;
-                    
-                    // Start duration timer
-                    if (call.seconds_duration) {
-                        this.currentCall.duration = call.seconds_duration;
+                    this.currentCall = {
+                        id: data.active_call.id,
+                        uuid: data.active_call.uuid,
+                        caller_number: data.active_call.caller_number,
+                        caller_name: data.active_call.caller_name || '',
+                        is_held: data.active_call.is_held || false,
+                        is_muted: data.active_call.is_muted || false,
+                        recording_paused: data.active_call.recording_paused || false,
+                        duration: data.active_call.seconds_duration || 0
+                    };
+
+                    if (newStatus === 'ringing_inbound' && this.phoneStatus !== 'ringing_inbound') {
+                        this.phoneCollapsed = false;
+                        this.startRinging();
+                    } else if (newStatus !== 'ringing_inbound') {
+                        this.stopRinging();
+                    }
+
+                    if (['speaking', 'active'].includes(newStatus) && !this.callDurationInterval) {
                         this.startCallTimer();
                     }
 
-                    // Auto expand phone console on active call
-                    if (this.phoneCollapsed) {
-                        this.togglePhoneCollapse();
-                    }
-                    
-                    // Autofill main caller intake form if blank
-                    if (!this.caller.number && call.caller_number) {
-                        this.caller.number = call.caller_number;
-                        this.searchCaller();
-                    }
+                    this.phoneStatus = newStatus;
                 } else {
-                    // No active call
-                    if (['ringing', 'speaking', 'active', 'held', 'ringing_inbound'].includes(this.phoneStatus)) {
-                        this.phoneStatus = 'online';
+                    if (uiIsInCall) {
+                        this.stopRinging();
                         this.stopCallTimer();
-                        this.phoneLoadRecentLogs();
+                        this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
                     }
+                    this.phoneStatus = newStatus;
                 }
             } catch (e) {
                 console.error('Telephony status check failed:', e);
@@ -1792,13 +2282,17 @@ function intakeComponent() {
                     body: JSON.stringify(this.phoneAuthForm)
                 });
                 const data = await response.json();
-                if (response.ok) {
+                if (response.ok && data.status === 'success') {
                     this.phoneAuthenticated = true;
-                    this.ziwoUsername = data.username;
-                    this.phoneStatus = data.status || 'online';
+                    this.ziwoUsername = data.username || data.ziwo_username || '';
+                    this.ziwoToken = data.access_token || data.ziwo_token || null;
+                    this.ziwoContactCenter = data.contact_center || 'nayatel';
+                    this.phoneStatus = 'online';
                     this.phoneAuthForm.password = '';
                     this.phoneSearchContacts();
                     this.phoneLoadRecentLogs();
+                    // Initialize ZIWO SDK WebSocket connection after successful auth
+                    this.$nextTick(() => this.initZiwoSdk());
                     if (window.Notification) window.Notification.success('Telephony session registered successfully.', 'Telephony Connected');
                 } else {
                     this.phoneStatusError = data.message || 'Authentication failed.';
@@ -1809,6 +2303,431 @@ function intakeComponent() {
             } finally {
                 this.phoneSubmitting = false;
             }
+        },
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // ZIWO SDK — WebSocket/Verto real-time call event wiring
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        initZiwoSdk() {
+            // ── SINGLETON GUARD: never initialize twice ──
+            // Without this, two overlapping phoneCheckStatus() calls (e.g. poll + Echo broadcast)
+            // can both pass the !this.ziwoSdkClient check before $nextTick resolves, registering
+            // ALL event listeners twice. Doubled listeners = every SDK event fires twice,
+            // including ziwo-requesting, which spawns a phantom second outbound call.
+            if (this.ziwoSdkInitialized) {
+                console.warn('[ZIWO SDK] Already initialized — skipping duplicate init.');
+                return;
+            }
+            this.ziwoSdkInitialized = true;
+
+            if (this.isMockMode) {
+                console.log('[ZIWO SDK] In mock mode — skipping WebRTC client initialization.');
+                this.phoneStatus = 'online';
+                return;
+            }
+            if (!window.ziwoCoreFront) {
+                console.error('[ZIWO SDK] ziwo-core-front not loaded on window. Check CDN script tag.');
+                this.ziwoSdkInitialized = false; // allow retry
+                return;
+            }
+            if (!this.ziwoToken) {
+                console.warn('[ZIWO SDK] No access_token available — cannot initialize SDK.');
+                this.ziwoSdkInitialized = false; // allow retry
+                return;
+            }
+
+            console.log('[ZIWO SDK] Initializing ZiwoClient for contact center:', this.ziwoContactCenter);
+
+            try {
+                this.ziwoSdkClient = new window.ziwoCoreFront.ZiwoClient({
+                    contactCenterName: this.ziwoContactCenter,
+                    autoConnect: false,
+                    credentials: {
+                        authenticationToken: this.ziwoToken,
+                    },
+                    mediaTag: document.getElementById('ziwo-peer-audio'),
+                });
+
+                // Connect explicitly and handle 401 Unauthorized or other connection rejections
+                this.ziwoSdkClient.connect()
+                    .then(() => {
+                        console.log('[ZIWO SDK] Connected successfully ✓');
+                    })
+                    .catch((err) => {
+                        console.error('[ZIWO SDK] Connection/Auth failed:', err);
+                        
+                        // Session expired or invalid token
+                        this.phoneResetUI();
+                        this.phoneStatus = 'offline';
+                        this.phoneAuthenticated = false;
+                        this.ziwoToken = null;
+                        this.ziwoUsername = '';
+                        this.ziwoSdkInitialized = false; // allow re-init on next login
+                        this.phoneStatusError = 'Telephony session expired or unauthorized. Please log in again.';
+                        if (window.Notification) {
+                            window.Notification.error('Telephony session expired. Please log in again.', 'Unauthorized');
+                        }
+
+                        // Notify backend to clear the invalid token from database
+                        fetch('/telephony/disconnect', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                                'Accept': 'application/json'
+                            }
+                        }).catch(() => {});
+                    });
+            } catch (err) {
+                console.error('[ZIWO SDK] ZiwoClient init failed:', err);
+                this.ziwoSdkInitialized = false; // allow retry on next attempt
+                return;
+            }
+
+            // Request browser notification permission proactively
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+
+            // Helper: SDK event detail = { currentCall: Call, callID, direction, ... }
+            // The actual SDK Call object (with .answer()/.hangup()) lives at e.detail.currentCall
+            // The call ID field is "callID" (capital D)
+            const extractCall = (e) => e.detail?.currentCall || e.detail?.call || null;
+            const extractCallId = (e) => e.detail?.callID || e.detail?.primaryCallID || e.detail?.currentCall?.callID || null;
+            const extractNum = (detail) => detail?.phoneNumber || detail?.callerNumber || detail?.from || detail?.callerIdNumber || detail?.caller || detail?.currentCall?.phoneNumber || '';
+
+            // ── INBOUND: call is ringing ──────────────────────────────────
+            window.addEventListener('ziwo-ringing', (e) => {
+                const call = extractCall(e);  // e.detail.currentCall — the real SDK Call instance
+                const callId = extractCallId(e) || ('inbound-' + Date.now());
+                const num = extractNum(e.detail);
+                const isInbound = !e.detail?.direction || e.detail?.direction === 'inbound';
+
+                console.log('[ZIWO SDK] ziwo-ringing | callId:', callId, 'num:', num, 'direction:', e.detail?.direction, 'call obj:', call);
+
+                // Store the REAL SDK Call instance (has .answer() / .hangup())
+                if (call) this.ziwoActiveCalls[callId] = call;
+
+                if (isInbound && this.phoneStatus !== 'ringing_inbound') {
+                    this.currentCall = {
+                        id: callId,
+                        uuid: callId,
+                        caller_number: num,
+                        caller_name: e.detail?.callerIdName || e.detail?.displayName || '',
+                        is_held: false,
+                        is_muted: false,
+                        recording_paused: false,
+                        duration: 0,
+                        direction: 'inbound'
+                    };
+                    this.phoneStatus = 'ringing_inbound';
+                    this.phoneCollapsed = false;
+                    this.startRinging();
+
+                    // Fire browser desktop notification
+                    if ('Notification' in window && Notification.permission === 'granted') {
+                        const notif = new Notification('📞 Incoming Call', {
+                            body: `Caller: ${num || 'Unknown'}`,
+                            icon: '/favicon.ico',
+                            requireInteraction: true,
+                            tag: 'inbound-call-' + callId
+                        });
+                        notif.onclick = () => {
+                            window.focus();
+                            this.phoneCollapsed = false;
+                            notif.close();
+                        };
+                    }
+
+                    // Pre-fill caller form
+                    if (num && !this.caller.number) {
+                        this.caller.number = num;
+                        this.searchCaller();
+                    }
+                }
+            });
+
+            // ── INBOUND FALLBACK: SDK may fire ziwo-invite for inbound ──
+            window.addEventListener('ziwo-invite', (e) => {
+                const call = extractCall(e);
+                console.log('[ZIWO SDK] ziwo-invite raw detail:', e.detail, 'extracted call:', call);
+                if (this.phoneStatus === 'ringing_inbound') return; // already handled
+
+                const callId = call?.callId || call?.id || ('invite-' + Date.now());
+                const num = call?.phoneNumber || call?.callerNumber || call?.from || call?.callerIdNumber || call?.caller || '';
+
+                if (call) this.ziwoActiveCalls[callId] = call;
+
+                this.currentCall = {
+                    id: callId,
+                    uuid: callId,
+                    caller_number: num,
+                    caller_name: call?.callerIdName || call?.displayName || '',
+                    is_held: false,
+                    is_muted: false,
+                    recording_paused: false,
+                    duration: 0
+                };
+                this.phoneStatus = 'ringing_inbound';
+                this.phoneCollapsed = false;
+                this.startRinging();
+            });
+
+            // ── OUTBOUND: call is being established ───────────────────────
+            // isConferenceResuming: set true when SDK internally resumes a held call
+            // (which also fires ziwo-requesting). This prevents treating the SDK's
+            // own resume cycle as a user-initiated new outbound leg.
+            window.addEventListener('ziwo-requesting', (e) => {
+                const call = e.detail?.call;
+                if (call) {
+                    this.ziwoActiveCalls[call.callId] = call;
+                    // Only update currentCall.id for genuine new outbound calls,
+                    // not for SDK-internal resume sequences
+                    if (!this.isConferenceResuming) {
+                        this.currentCall.id = call.callId;
+                        this.currentCall.uuid = call.callId;
+                        this.phoneStatus = 'ringing';
+                    }
+                } else {
+                    if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
+                }
+                console.log('[ZIWO SDK] ziwo-requesting');
+            });
+            window.addEventListener('ziwo-trying', (e) => {
+                const call = e.detail?.call;
+                if (call) {
+                    this.ziwoActiveCalls[call.callId] = call;
+                    if (!this.isConferenceResuming) {
+                        this.currentCall.id = this.currentCall.id || call.callId;
+                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
+                    }
+                }
+                console.log('[ZIWO SDK] ziwo-trying');
+                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
+            });
+            window.addEventListener('ziwo-early', (e) => {
+                const call = e.detail?.call;
+                if (call) {
+                    this.ziwoActiveCalls[call.callId] = call;
+                    if (!this.isConferenceResuming) {
+                        this.currentCall.id = this.currentCall.id || call.callId;
+                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
+                    }
+                }
+                console.log('[ZIWO SDK] ziwo-early — call is ringing on remote side');
+                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
+            });
+
+            // ── ACTIVE: call connected / answered ─────────────────────────
+            window.addEventListener('ziwo-active', (e) => {
+                const call = extractCall(e);
+                console.log('[ZIWO SDK] ziwo-active:', call);
+                const callId = call?.callId || call?.id || this.currentCall.id;
+                if (call && callId) this.ziwoActiveCalls[callId] = call;
+                this.stopRinging();
+                this.phoneStatus = 'speaking';
+                if (!this.currentCall.id && callId) {
+                    this.currentCall.id = callId;
+                    this.currentCall.uuid = callId;
+                }
+                // Ensure caller number is filled if it was blank in currentCall
+                const activeNum = call?.phoneNumber || call?.callerNumber || extractNum(e.detail);
+                if (activeNum && (!this.currentCall.caller_number || this.currentCall.caller_number === '')) {
+                    this.currentCall.caller_number = activeNum;
+                    this.currentCall.caller_name = call?.callerIdName || call?.displayName || '';
+                }
+                this.startCallTimer();
+                if (this.currentCall.caller_number && !this.caller.number) {
+                    this.caller.number = this.currentCall.caller_number;
+                    this.searchCaller();
+                }
+            });
+
+            // ── HANGUP: call ended ────────────────────────────────────────
+            window.addEventListener('ziwo-hangup', (e) => {
+                const call = extractCall(e);
+                console.log('[ZIWO SDK] ziwo-hangup:', call);
+                const callId = call?.callId || call?.id;
+                if (callId) delete this.ziwoActiveCalls[callId];
+                
+                this.stopRinging();
+                this.playEndCallTone();
+                this.phoneLoadRecentLogs();
+
+                // If we still have other active calls in the SDK, try to restore from heldParticipants
+                const remainingCallIds = Object.keys(this.ziwoActiveCalls);
+                if (remainingCallIds.length > 0) {
+                    // Find if any remaining call is in heldParticipants
+                    let restoredFromHeld = false;
+                    for (const nextCallId of remainingCallIds) {
+                        const heldIndex = this.heldParticipants.findIndex(p => p.id === nextCallId);
+                        if (heldIndex !== -1) {
+                            const heldEntry = this.heldParticipants[heldIndex];
+                            this.heldParticipants.splice(heldIndex, 1);
+                            const nextCall = this.ziwoActiveCalls[nextCallId];
+                            const num = heldEntry.number || nextCall?.phoneNumber || nextCall?.callerNumber || '';
+
+                            this.currentCall = {
+                                id: nextCallId,
+                                uuid: nextCallId,
+                                caller_number: num,
+                                caller_name: heldEntry.name || nextCall?.callerIdName || '',
+                                is_held: false,
+                                is_muted: false,
+                                recording_paused: false,
+                                duration: heldEntry.duration || 0,
+                                direction: heldEntry.direction || 'inbound'
+                            };
+
+                            // Set flag BEFORE calling unhold so ziwo-requesting
+                            // events from SDK resume don't overwrite our state
+                            this.isConferenceResuming = true;
+
+                            // Tell SDK to resume (will fire ziwo-unheld when done)
+                            if (nextCall && typeof nextCall.unhold === 'function') {
+                                try { nextCall.unhold(); } catch (err) {
+                                    console.warn('[ZIWO] Resume failed:', err);
+                                    this.isConferenceResuming = false;
+                                }
+                            } else {
+                                // No unhold method, clear flag immediately
+                                this.isConferenceResuming = false;
+                            }
+
+                            // Also notify backend
+                            fetch('/telephony/resume', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                                body: JSON.stringify({ call_id: nextCallId })
+                            }).catch(() => {});
+
+                            this.phoneStatus = 'speaking';
+                            restoredFromHeld = true;
+                            break;
+                        }
+                    }
+                    if (restoredFromHeld) return;
+
+                    // Remaining call not in heldParticipants — just show it as active
+                    const nextCallId = remainingCallIds[0];
+                    const nextCall = this.ziwoActiveCalls[nextCallId];
+                    const num = nextCall?.phoneNumber || nextCall?.callerNumber || '';
+                    this.currentCall = {
+                        id: nextCallId,
+                        uuid: nextCallId,
+                        caller_number: num,
+                        caller_name: nextCall?.callerIdName || nextCall?.displayName || '',
+                        is_held: false,
+                        is_muted: false,
+                        recording_paused: false,
+                        duration: this.currentCall.duration
+                    };
+                    this.phoneStatus = 'speaking';
+                    return;
+                }
+
+                // No active SDK calls — check heldParticipants array directly
+                if (this.heldParticipants.length > 0) {
+                    const lastHeld = this.heldParticipants.pop();
+                    this.currentCall = {
+                        id: lastHeld.id,
+                        uuid: lastHeld.id,
+                        caller_number: lastHeld.number,
+                        caller_name: lastHeld.name,
+                        is_held: false,
+                        is_muted: false,
+                        recording_paused: false,
+                        duration: lastHeld.duration,
+                        direction: lastHeld.direction || 'inbound'
+                    };
+                    const sdkCall = this.ziwoActiveCalls[lastHeld.id];
+                    if (sdkCall && typeof sdkCall.unhold === 'function') {
+                        this.isConferenceResuming = true;
+                        try { sdkCall.unhold(); } catch (err) {
+                            console.warn('[ZIWO] Unhold failed:', err);
+                            this.isConferenceResuming = false;
+                        }
+                    }
+                    if (lastHeld.id) {
+                        fetch('/telephony/resume', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                            body: JSON.stringify({ call_id: lastHeld.id })
+                        }).catch(() => {});
+                    }
+                    this.phoneStatus = 'speaking';
+                    return;
+                }
+
+                // If absolutely no calls are left, reset back to online/idle
+                this.phoneStatus = 'online';
+                this.stopCallTimer();
+                this.dialNumberInput = '';
+                this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
+            });
+
+            // ── DESTROY: call fully cleaned up ────────────────────────────
+            window.addEventListener('ziwo-destroy', (e) => {
+                const call = extractCall(e);
+                const callId = call?.callId || call?.id;
+                if (callId) delete this.ziwoActiveCalls[callId];
+                console.log('[ZIWO SDK] ziwo-destroy');
+                // Only reset to idle when ALL calls are gone AND we are not in
+                // a conference-hold transition (heldParticipants means a new leg
+                // is being dialed — don't wipe the overlay)
+                if (Object.keys(this.ziwoActiveCalls).length === 0 && this.heldParticipants.length === 0) {
+                    this.phoneStatus = 'online';
+                    this.stopCallTimer();
+                }
+            });
+
+            // ── HOLD / UNHOLD ─────────────────────────────────────────────
+            window.addEventListener('ziwo-held', () => {
+                console.log('[ZIWO SDK] ziwo-held');
+                // During conference, the SDK may fire ziwo-held for the OTHER leg.
+                // Only update state if we are not mid-resume (the held event is for our current call).
+                if (!this.isConferenceResuming) {
+                    this.currentCall.is_held = true;
+                    this.phoneStatus = 'held';
+                }
+            });
+            window.addEventListener('ziwo-unheld', () => {
+                console.log('[ZIWO SDK] ziwo-unheld');
+                this.isConferenceResuming = false; // resume cycle complete
+                this.currentCall.is_held = false;
+                this.phoneStatus = 'speaking';
+            });
+
+            // ── MUTE / UNMUTE ─────────────────────────────────────────────
+            window.addEventListener('ziwo-mute', () => { this.currentCall.is_muted = true; });
+            window.addEventListener('ziwo-unmute', () => { this.currentCall.is_muted = false; });
+
+            // ── SDK CONNECTED / DISCONNECTED ──────────────────────────────
+            window.addEventListener('ziwo-connected', () => {
+                console.log('[ZIWO SDK] WebSocket connected ✓');
+                // Only update status if we're NOT in an active call.
+                // The SDK fires ziwo-connected on every reconnect — including reconnects
+                // that happen mid-call — and overwriting phoneStatus here would dismiss
+                // the call overlay while a live call is still in progress.
+                const liveStates = ['ringing', 'ringing_inbound', 'speaking', 'held'];
+                if (!liveStates.includes(this.phoneStatus)) {
+                    this.phoneStatus = 'online';
+                }
+            });
+            window.addEventListener('ziwo-disconnected', () => {
+                console.warn('[ZIWO SDK] WebSocket disconnected');
+                if (this.phoneStatus !== 'offline') {
+                    const liveStates = ['ringing', 'ringing_inbound', 'speaking', 'held'];
+                    if (!liveStates.includes(this.phoneStatus)) {
+                        this.phoneStatus = 'online'; // stay online, SDK will auto-reconnect
+                    }
+                }
+            });
+            window.addEventListener('ziwo-recovering', () => {
+                console.warn('[ZIWO SDK] Call recovering from reconnect...');
+            });
+
+            console.log('[ZIWO SDK] All event listeners registered ✓');
         },
 
         async phoneDisconnect() {
@@ -1833,166 +2752,327 @@ function intakeComponent() {
 
         async phoneDial() {
             if (!this.dialNumberInput) return;
-            this.phoneSubmitting = true;
-            try {
-                const response = await fetch('/telephony/dial', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ phone_number: this.dialNumberInput })
-                });
-                const data = await response.json();
-                if (response.ok) {
-                    this.phoneStatus = 'ringing';
-                    this.currentCall.id = data.call_id;
-                    this.currentCall.uuid = data.uuid;
-                    this.currentCall.caller_number = this.dialNumberInput;
-                    this.currentCall.caller_name = data.caller_name || '';
-                    this.currentCall.duration = 0;
-                    this.startCallTimer();
-                    
-                    // Populate main intake form too
-                    this.caller.number = this.dialNumberInput;
-                    this.searchCaller();
-                } else {
-                    if (window.Notification) window.Notification.error(data.message || 'Could not place outbound call.', 'Call Failed');
+            const num = this.dialNumberInput.trim();
+
+            if (this.isMockMode) {
+                try {
+                    const response = await fetch('/telephony/dial', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({ phone_number: num })
+                    });
+                    const data = await response.json();
+                    if (response.ok && data.status === 'success') {
+                        this.currentCall.caller_number = num;
+                        this.currentCall.caller_name = '';
+                        this.currentCall.duration = 0;
+                        this.currentCall.direction = 'outbound';
+                        this.phoneStatus = 'ringing';
+                        this.phoneCollapsed = false;
+                        this.caller.number = num;
+                        this.searchCaller();
+
+                        if (data.call_id) {
+                            this.currentCall.id = data.call_id;
+                            this.currentCall.uuid = data.call_id;
+                        }
+                    } else {
+                        if (window.Notification) window.Notification.error(data.message || 'Outbound call failed in mock mode.', 'Dial Failed');
+                    }
+                } catch (e) {
+                    console.error('Outbound call failed in mock mode:', e);
                 }
+                return;
+            }
+
+            if (!this.ziwoSdkClient) {
+                console.error('[ZIWO SDK] SDK not initialized — cannot place call.');
+                if (window.Notification) window.Notification.error('Telephony SDK not ready. Please re-authenticate.', 'Call Failed');
+                return;
+            }
+            try {
+                console.log('[ZIWO SDK] Starting outbound call to:', num);
+                this.currentCall.caller_number = num;
+                this.currentCall.caller_name = '';
+                this.currentCall.duration = 0;
+                this.currentCall.direction = 'outbound';
+                this.phoneStatus = 'ringing';
+                this.phoneCollapsed = false;
+                this.caller.number = num;
+                this.searchCaller();
+                this.ziwoSdkClient.startCall(num);
             } catch (e) {
-                console.error('Outbound call failed:', e);
-            } finally {
-                this.phoneSubmitting = false;
+                console.error('[ZIWO SDK] Outbound call failed:', e);
+                this.phoneStatus = 'online';
+                if (window.Notification) window.Notification.error('Could not place outbound call.', 'Call Failed');
             }
         },
 
         async phoneAnswer() {
-            if (!this.currentCall.id) return;
-            try {
-                const response = await fetch('/telephony/answer', {
+            const call = Object.values(this.ziwoActiveCalls)[0];
+            console.log('[ZIWO SDK] Answering call:', call);
+            this.stopRinging();
+
+            const callId = call ? (call.callId || call.id) : this.currentCall.id;
+            if (callId) {
+                fetch('/telephony/answer', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-CSRF-TOKEN': '{{ csrf_token() }}',
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify({ call_id: this.currentCall.id })
-                });
-                if (response.ok) {
-                    this.phoneStatus = 'speaking';
-                    this.startCallTimer();
+                    body: JSON.stringify({ call_id: callId })
+                }).then(() => {
+                    if (this.isMockMode) {
+                        this.phoneStatus = 'speaking';
+                        this.startCallTimer();
+                    }
+                }).catch(err => console.error('Failed to notify backend of answer:', err));
+            }
+
+            if (this.isMockMode) {
+                return;
+            }
+
+            if (!call) {
+                console.warn('[ZIWO SDK] No active call object to answer');
+                return;
+            }
+            try {
+                if (typeof call.answer === 'function') {
+                    call.answer();
+                } else if (typeof call.accept === 'function') {
+                    call.accept();
+                } else {
+                    console.error('[ZIWO SDK] Call object has no answer/accept method. Keys:', Object.keys(call));
                 }
             } catch (e) {
-                console.error('Answer call failed:', e);
+                console.error('[ZIWO SDK] Answer failed:', e);
+                this.phoneStatus = 'ringing_inbound';
+                this.startRinging();
             }
         },
 
         async phoneHangup() {
-            if (!this.currentCall.id && !this.currentCall.uuid) return;
+            // During conference: hang up the CURRENT active leg (tracked by currentCall.id),
+            // not blindly the first entry in ziwoActiveCalls (which may be the held leg).
+            const currentCallId = this.currentCall.id;
+            const call = currentCallId
+                ? (this.ziwoActiveCalls[currentCallId] || Object.values(this.ziwoActiveCalls).find(c => (c.callId || c.id) === currentCallId))
+                : Object.values(this.ziwoActiveCalls)[0];
+            console.log('[ZIWO SDK] Hanging up call:', call);
+            this.stopRinging();
+
+            const callId = call ? (call.callId || call.id) : currentCallId;
+            if (callId) {
+                try {
+                    await fetch('/telephony/hangup', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({ call_id: callId })
+                    });
+                } catch (err) {
+                    console.error('Failed to notify backend of hangup:', err);
+                }
+            }
+
+            if (this.isMockMode) {
+                this.phoneStatus = 'online';
+                this.stopCallTimer();
+                this.dialNumberInput = '';
+                this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
+                return;
+            }
+
+            // In SDK mode, let the ziwo-hangup event handle state transitions.
+            // Just invoke the SDK hangup; ziwo-hangup will clean up currentCall / phoneStatus.
+            if (!call) {
+                console.warn('[ZIWO SDK] No call object found to hang up — forcing UI reset.');
+                this.phoneStatus = 'online';
+                this.stopCallTimer();
+                this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
+                return;
+            }
             try {
-                const response = await fetch('/telephony/hangup', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        call_id: this.currentCall.id,
-                        uuid: this.currentCall.uuid
-                    })
-                });
-                if (response.ok) {
-                    this.phoneStatus = 'online';
-                    this.stopCallTimer();
-                    this.dialNumberInput = '';
-                    this.phoneLoadRecentLogs();
+                if (typeof call.hangup === 'function') {
+                    call.hangup();
+                } else if (typeof call.terminate === 'function') {
+                    call.terminate();
+                } else if (typeof call.reject === 'function') {
+                    call.reject();
+                } else {
+                    console.error('[ZIWO SDK] Call object has no hangup/terminate method. Keys:', Object.keys(call));
                 }
             } catch (e) {
-                console.error('Hangup failed:', e);
+                console.error('[ZIWO SDK] Hangup failed:', e);
             }
         },
 
         async phoneHold() {
-            if (!this.currentCall.id) return;
+            const callId = this.currentCall.id;
+            const call = callId
+                ? (this.ziwoActiveCalls[callId] || Object.values(this.ziwoActiveCalls)[0])
+                : Object.values(this.ziwoActiveCalls)[0];
+            if (!call) return;
+            console.log('[ZIWO SDK] Holding call:', call.callId || callId);
             try {
-                const response = await fetch('/telephony/hold', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ call_id: this.currentCall.id })
-                });
-                if (response.ok) {
-                    this.currentCall.is_held = true;
-                    this.phoneStatus = 'held';
+                call.hold();
+                // Notify backend
+                if (callId) {
+                    fetch('/telephony/hold', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                        body: JSON.stringify({ call_id: callId })
+                    }).catch(() => {});
                 }
             } catch (e) {
-                console.error('Hold call failed:', e);
+                console.error('[ZIWO SDK] Hold failed:', e);
             }
         },
 
         async phoneResume() {
-            if (!this.currentCall.id) return;
+            const callId = this.currentCall.id;
+            const call = callId
+                ? (this.ziwoActiveCalls[callId] || Object.values(this.ziwoActiveCalls)[0])
+                : Object.values(this.ziwoActiveCalls)[0];
+            if (!call) return;
+            console.log('[ZIWO SDK] Resuming call:', call.callId || callId);
             try {
-                const response = await fetch('/telephony/resume', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ call_id: this.currentCall.id })
-                });
-                if (response.ok) {
-                    this.currentCall.is_held = false;
-                    this.phoneStatus = 'speaking';
+                this.isConferenceResuming = true;
+                call.unhold();
+                if (callId) {
+                    fetch('/telephony/resume', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                        body: JSON.stringify({ call_id: callId })
+                    }).catch(() => {});
                 }
             } catch (e) {
-                console.error('Resume call failed:', e);
+                console.error('[ZIWO SDK] Resume failed:', e);
+                this.isConferenceResuming = false;
             }
         },
 
-        async phoneMute() {
-            if (!this.currentCall.id) return;
-            try {
-                const response = await fetch('/telephony/mute', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ call_id: this.currentCall.id })
-                });
-                if (response.ok) {
-                    this.currentCall.is_muted = true;
+        // ── Switch to a held call (tap held card) ────────────────────────
+        async switchToHeldCall(participant) {
+            if (!participant || !participant.id) return;
+
+            // 1. Snapshot current call to place it on hold
+            const currentId     = this.currentCall.id;
+            const currentNum    = this.currentCall.caller_number;
+            const currentName   = this.currentCall.caller_name;
+            const currentDur    = this.currentCall.duration;
+            const currentDir    = this.currentCall.direction || 'inbound';
+
+            // 2. Hold the current call
+            if (currentId) {
+                const currentSdk = this.ziwoActiveCalls[currentId];
+                if (currentSdk && typeof currentSdk.hold === 'function') {
+                    try { currentSdk.hold(); } catch (e) { console.warn('[ZIWO] Switch-hold failed:', e); }
                 }
+                fetch('/telephony/hold', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                    body: JSON.stringify({ call_id: currentId })
+                }).catch(() => {});
+
+                // Push current call back to heldParticipants (dedup)
+                const alreadyHeld = this.heldParticipants.some(p => p.id === currentId);
+                if (!alreadyHeld) {
+                    this.heldParticipants.push({
+                        id: currentId,
+                        number: currentNum,
+                        name: currentName,
+                        flag: this.getCountryFlagAndLocalTime(currentNum).flag,
+                        duration: currentDur,
+                        direction: currentDir,
+                        heldAt: Date.now()
+                    });
+                }
+            }
+
+            // 3. Remove the target participant from heldParticipants
+            const idx = this.heldParticipants.findIndex(p => p.id === participant.id);
+            if (idx !== -1) this.heldParticipants.splice(idx, 1);
+
+            // 4. Resume target call on SDK
+            const targetSdk = this.ziwoActiveCalls[participant.id];
+            this.isConferenceResuming = true;
+            if (targetSdk && typeof targetSdk.unhold === 'function') {
+                try { targetSdk.unhold(); } catch (e) {
+                    console.warn('[ZIWO] Switch-resume failed:', e);
+                    this.isConferenceResuming = false;
+                }
+            } else {
+                this.isConferenceResuming = false;
+            }
+
+            // 5. Notify backend
+            fetch('/telephony/resume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                body: JSON.stringify({ call_id: participant.id })
+            }).catch(() => {});
+
+            // 6. Update currentCall to the resumed participant
+            this.currentCall = {
+                id: participant.id,
+                uuid: participant.id,
+                caller_number: participant.number,
+                caller_name: participant.name,
+                is_held: false,
+                is_muted: false,
+                recording_paused: false,
+                duration: participant.duration || 0,
+                direction: participant.direction || 'inbound'
+            };
+            this.phoneStatus = 'speaking';
+        },
+
+        // ── Disconnect a held call (× button on held card) ──────────────
+        async hangupHeldCall(participant) {
+            if (!participant || !participant.id) return;
+            const sdkCall = this.ziwoActiveCalls[participant.id];
+            if (sdkCall && typeof sdkCall.hangup === 'function') {
+                try { sdkCall.hangup(); } catch (e) { console.warn('[ZIWO] Hangup held failed:', e); }
+            }
+            // Remove from heldParticipants immediately
+            const idx = this.heldParticipants.findIndex(p => p.id === participant.id);
+            if (idx !== -1) this.heldParticipants.splice(idx, 1);
+            delete this.ziwoActiveCalls[participant.id];
+            fetch('/telephony/hangup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                body: JSON.stringify({ call_id: participant.id })
+            }).catch(() => {});
+        },
+
+        async phoneMute() {
+            const call = Object.values(this.ziwoActiveCalls)[0];
+            if (!call) return;
+            try {
+                call.mute();
             } catch (e) {
-                console.error('Mute call failed:', e);
+                console.error('[ZIWO SDK] Mute failed:', e);
             }
         },
 
         async phoneUnmute() {
-            if (!this.currentCall.id) return;
+            const call = Object.values(this.ziwoActiveCalls)[0];
+            if (!call) return;
             try {
-                const response = await fetch('/telephony/unmute', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ call_id: this.currentCall.id })
-                });
-                if (response.ok) {
-                    this.currentCall.is_muted = false;
-                }
+                call.unmute();
             } catch (e) {
-                console.error('Unmute call failed:', e);
+                console.error('[ZIWO SDK] Unmute failed:', e);
             }
         },
 
@@ -2061,15 +3141,195 @@ function intakeComponent() {
             }
         },
 
+        // ─── Add or Call Panel logic ───
+
+        openAddOrCallPanel() {
+            this.addOrCallInput = '+' + this.addOrCallSelectedCountry.dial;
+            this.addOrCallSearch = '';
+            this.addOrCallDialpadOpen = false;
+            this.addOrCallCountryPickerOpen = false;
+            this.addOrCallOpen = true;
+        },
+
+        closeAddOrCallPanel() {
+            this.addOrCallOpen = false;
+            this.addOrCallCountryPickerOpen = false;
+        },
+
+        addOrCallKeypad(key) {
+            if (key === 'backspace') {
+                this.addOrCallInput = this.addOrCallInput.slice(0, -1);
+            } else {
+                this.addOrCallInput += key;
+            }
+            // Detect country prefix as user types
+            const country = this.detectCountryFromNumber(this.addOrCallInput);
+            if (country) this.addOrCallSelectedCountry = country;
+        },
+
+        get filteredCountries() {
+            const q = this.addOrCallSearch.toLowerCase();
+            return this.COUNTRY_DATA.filter(c =>
+                c.name.toLowerCase().includes(q) || c.dial.includes(q) || c.code.toLowerCase().includes(q)
+            );
+        },
+
+        selectAddOrCallCountry(country) {
+            this.addOrCallSelectedCountry = country;
+            this.addOrCallInput = '+' + country.dial;
+            this.addOrCallCountryPickerOpen = false;
+        },
+
+        get filteredTeammates() {
+            const q = this.addOrCallSearch.toLowerCase();
+            return this.mockTeammates.filter(t =>
+                t.name.toLowerCase().includes(q) || t.ext.includes(q)
+            );
+        },
+
+        get filteredQueues() {
+            const q = this.addOrCallSearch.toLowerCase();
+            return this.mockQueues.filter(q2 =>
+                q2.name.toLowerCase().includes(q)
+            );
+        },
+
+        get filteredPhonebook() {
+            const q = this.addOrCallSearch.toLowerCase();
+            return this.phonebookContacts.filter(c =>
+                (c.name || '').toLowerCase().includes(q) || (c.phone_number || '').includes(q)
+            );
+        },
+
+        get formattedHeldDuration() {
+            return (p) => {
+                const h = Math.floor(p.duration / 3600).toString().padStart(2, '0');
+                const m = Math.floor((p.duration % 3600) / 60).toString().padStart(2, '0');
+                const s = (p.duration % 60).toString().padStart(2, '0');
+                return `${h}:${m}:${s}`;
+            };
+        },
+
+        async executeAddToCall(targetNumber, displayName) {
+            if (!targetNumber) return;
+
+            // ── Step 1: Snapshot the current caller before we modify anything ──
+            const previousCallerNumber = this.currentCall.caller_number;
+            const previousCallerName   = this.currentCall.caller_name;
+            const previousCallId       = this.currentCall.id;
+            const previousCallDuration = this.currentCall.duration;
+
+            // ── Step 2: Put the current active caller on hold (soft hold only — no reset) ──
+            if (previousCallerNumber) {
+                const participant = {
+                    number: previousCallerNumber,
+                    name: previousCallerName || previousCallerNumber,
+                    flag: this.getCountryFlagAndLocalTime(previousCallerNumber).flag,
+                    duration: previousCallDuration,
+                    direction: this.currentCall.direction || 'inbound',
+                    heldAt: Date.now(),
+                    id: previousCallId
+                };
+
+                // Put SDK call on hold (does NOT destroy it)
+                const existingCall = previousCallId
+                    ? (this.ziwoActiveCalls[previousCallId] || Object.values(this.ziwoActiveCalls)[0])
+                    : Object.values(this.ziwoActiveCalls)[0];
+                if (existingCall && typeof existingCall.hold === 'function') {
+                    try { existingCall.hold(); } catch (e) { console.warn('[ZIWO] Hold failed:', e); }
+                }
+
+                // Notify backend of hold (fire-and-forget)
+                if (previousCallId) {
+                    fetch('/telephony/hold', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                        body: JSON.stringify({ call_id: previousCallId })
+                    }).catch(() => {});
+                }
+
+                // Only push if not already tracked (prevents duplicate held cards)
+                const alreadyHeld = this.heldParticipants.some(p => p.id === previousCallId);
+                if (!alreadyHeld) {
+                    this.heldParticipants.push(participant);
+                }
+                this.currentCall.is_held = true;
+                // Keep the call timer running — do NOT call stopCallTimer()
+            }
+
+            this.closeAddOrCallPanel();
+
+            // ── Step 3: Start new outbound leg ──
+            if (this.isMockMode) {
+                try {
+                    const response = await fetch('/telephony/dial', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                        body: JSON.stringify({ phone_number: targetNumber })
+                    });
+                    const data = await response.json();
+                    if (response.ok && data.status === 'success') {
+                        // Update currentCall to track the new leg — keep timer running
+                        this.currentCall.id            = data.call_id || ('conf_' + Date.now());
+                        this.currentCall.uuid          = data.call_id || this.currentCall.id;
+                        this.currentCall.caller_number = targetNumber;
+                        this.currentCall.caller_name   = displayName || '';
+                        this.currentCall.is_held       = false;
+                        this.currentCall.duration      = 0;
+                        this.currentCall.direction     = 'outbound';
+                        this.phoneStatus = 'ringing';
+                        if (window.Notification) window.Notification.info(`Calling ${displayName || targetNumber}… previous caller is on hold.`, 'Conference Mode');
+                    } else {
+                        if (window.Notification) window.Notification.error(data.message || 'Could not add to call.', 'Add to Call Failed');
+                    }
+                } catch (e) {
+                    console.error('Execute add-to-call failed:', e);
+                }
+                return;
+            }
+
+            // SDK real-mode: dial the new leg via SDK
+            if (this.ziwoSdkClient) {
+                try {
+                    // Update tracking for incoming ziwo-active event
+                    this.currentCall.caller_number = targetNumber;
+                    this.currentCall.caller_name   = displayName || '';
+                    this.currentCall.is_held       = false;
+                    this.currentCall.duration      = 0;
+                    this.currentCall.direction     = 'outbound';
+                    this.phoneStatus = 'ringing';
+                    this.ziwoSdkClient.startCall(targetNumber);
+                    if (window.Notification) window.Notification.info(`Calling ${displayName || targetNumber}… previous caller is on hold.`, 'Conference Mode');
+                } catch (e) {
+                    console.error('[ZIWO SDK] Conference dial failed:', e);
+                    // Restore previous caller if dial failed
+                    this.currentCall.caller_number = previousCallerNumber;
+                    this.currentCall.caller_name   = previousCallerName;
+                    this.currentCall.is_held       = false;
+                }
+            }
+
+            // Notify backend
+            if (previousCallId) {
+                fetch('/telephony/conference', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                    body: JSON.stringify({ call_id: previousCallId, target_number: targetNumber })
+                }).catch(() => {});
+            }
+        },
+
         async phoneSearchContacts() {
             try {
                 const params = new URLSearchParams();
                 if (this.phoneSearchQuery) params.append('query', this.phoneSearchQuery);
                 if (this.phoneCategoryFilter) params.append('category', this.phoneCategoryFilter);
-                
+
                 const response = await fetch(`/telephony/phonebook?${params.toString()}`);
                 if (response.ok) {
-                    this.phonebookContacts = await response.json();
+                    const data = await response.json();
+                    // Backend returns {status, contacts:[...]} or a plain array
+                    this.phonebookContacts = Array.isArray(data) ? data : (data.contacts || []);
                 }
             } catch (e) {
                 console.error('Fetch contacts failed:', e);
@@ -2172,6 +3432,12 @@ function intakeComponent() {
                 clearInterval(this.callDurationInterval);
                 this.callDurationInterval = null;
             }
+            
+            // If we are stopping an active/ringing call, play the end call notification sound
+            if (this.currentCall.id || this.currentCall.uuid) {
+                this.playEndCallTone();
+            }
+
             this.currentCall = {
                 id: null,
                 uuid: null,
@@ -2185,23 +3451,408 @@ function intakeComponent() {
         },
 
         get formattedCallDuration() {
-            const m = Math.floor(this.currentCall.duration / 60).toString().padStart(2, '0');
+            const h = Math.floor(this.currentCall.duration / 3600).toString().padStart(2, '0');
+            const m = Math.floor((this.currentCall.duration % 3600) / 60).toString().padStart(2, '0');
             const s = (this.currentCall.duration % 60).toString().padStart(2, '0');
-            return `${m}:${s}`;
+            return `${h}:${m}:${s}`;
+        },
+
+        formatHeldCallDuration(duration) {
+            const h = Math.floor(duration / 3600).toString().padStart(2, '0');
+            const m = Math.floor((duration % 3600) / 60).toString().padStart(2, '0');
+            const s = (duration % 60).toString().padStart(2, '0');
+            return `${h}:${m}:${s}`;
+        },
+
+        // ── Full country dial-code → flag/code/name lookup ──
+        get COUNTRY_DATA() {
+            return [
+                { dial: '93',   code: 'AF', flag: '🇦🇫', name: 'Afghanistan' },
+                { dial: '358',  code: 'AX', flag: '🇦🇽', name: 'Åland Islands' },
+                { dial: '355',  code: 'AL', flag: '🇦🇱', name: 'Albania' },
+                { dial: '213',  code: 'DZ', flag: '🇩🇿', name: 'Algeria' },
+                { dial: '1684', code: 'AS', flag: '🇦🇸', name: 'American Samoa' },
+                { dial: '376',  code: 'AD', flag: '🇦🇩', name: 'Andorra' },
+                { dial: '244',  code: 'AO', flag: '🇦🇴', name: 'Angola' },
+                { dial: '1264', code: 'AI', flag: '🇦🇮', name: 'Anguilla' },
+                { dial: '1268', code: 'AG', flag: '🇦🇬', name: 'Antigua and Barbuda' },
+                { dial: '54',   code: 'AR', flag: '🇦🇷', name: 'Argentina' },
+                { dial: '374',  code: 'AM', flag: '🇦🇲', name: 'Armenia' },
+                { dial: '297',  code: 'AW', flag: '🇦🇼', name: 'Aruba' },
+                { dial: '61',   code: 'AU', flag: '🇦🇺', name: 'Australia' },
+                { dial: '43',   code: 'AT', flag: '🇦🇹', name: 'Austria' },
+                { dial: '994',  code: 'AZ', flag: '🇦🇿', name: 'Azerbaijan' },
+                { dial: '1242', code: 'BS', flag: '🇧🇸', name: 'Bahamas' },
+                { dial: '973',  code: 'BH', flag: '🇧🇭', name: 'Bahrain' },
+                { dial: '880',  code: 'BD', flag: '🇧🇩', name: 'Bangladesh' },
+                { dial: '1246', code: 'BB', flag: '🇧🇧', name: 'Barbados' },
+                { dial: '375',  code: 'BY', flag: '🇧🇾', name: 'Belarus' },
+                { dial: '32',   code: 'BE', flag: '🇧🇪', name: 'Belgium' },
+                { dial: '501',  code: 'BZ', flag: '🇧🇿', name: 'Belize' },
+                { dial: '229',  code: 'BJ', flag: '🇧🇯', name: 'Benin' },
+                { dial: '1441', code: 'BM', flag: '🇧🇲', name: 'Bermuda' },
+                { dial: '975',  code: 'BT', flag: '🇧🇹', name: 'Bhutan' },
+                { dial: '591',  code: 'BO', flag: '🇧🇴', name: 'Bolivia' },
+                { dial: '387',  code: 'BA', flag: '🇧🇦', name: 'Bosnia and Herzegovina' },
+                { dial: '267',  code: 'BW', flag: '🇧🇼', name: 'Botswana' },
+                { dial: '55',   code: 'BR', flag: '🇧🇷', name: 'Brazil' },
+                { dial: '246',  code: 'IO', flag: '🇮🇴', name: 'British Indian Ocean Territory' },
+                { dial: '673',  code: 'BN', flag: '🇧🇳', name: 'Brunei Darussalam' },
+                { dial: '359',  code: 'BG', flag: '🇧🇬', name: 'Bulgaria' },
+                { dial: '226',  code: 'BF', flag: '🇧🇫', name: 'Burkina Faso' },
+                { dial: '257',  code: 'BI', flag: '🇧🇮', name: 'Burundi' },
+                { dial: '855',  code: 'KH', flag: '🇰🇭', name: 'Cambodia' },
+                { dial: '237',  code: 'CM', flag: '🇨🇲', name: 'Cameroon' },
+                { dial: '1',    code: 'CA', flag: '🇨🇦', name: 'Canada' },
+                { dial: '238',  code: 'CV', flag: '🇨🇻', name: 'Cape Verde' },
+                { dial: '1345', code: 'KY', flag: '🇰🇾', name: 'Cayman Islands' },
+                { dial: '236',  code: 'CF', flag: '🇨🇫', name: 'Central African Republic' },
+                { dial: '235',  code: 'TD', flag: '🇹🇩', name: 'Chad' },
+                { dial: '56',   code: 'CL', flag: '🇨🇱', name: 'Chile' },
+                { dial: '86',   code: 'CN', flag: '🇨🇳', name: 'China' },
+                { dial: '57',   code: 'CO', flag: '🇨🇴', name: 'Colombia' },
+                { dial: '269',  code: 'KM', flag: '🇰🇲', name: 'Comoros' },
+                { dial: '243',  code: 'CD', flag: '🇨🇩', name: 'Congo (Kinshasa)' },
+                { dial: '242',  code: 'CG', flag: '🇨🇬', name: 'Congo (Brazzaville)' },
+                { dial: '682',  code: 'CK', flag: '🇨🇰', name: 'Cook Islands' },
+                { dial: '506',  code: 'CR', flag: '🇨🇷', name: 'Costa Rica' },
+                { dial: '225',  code: 'CI', flag: '🇨🇮', name: "Cote d'Ivoire" },
+                { dial: '385',  code: 'HR', flag: '🇭🇷', name: 'Croatia' },
+                { dial: '53',   code: 'CU', flag: '🇨🇺', name: 'Cuba' },
+                { dial: '357',  code: 'CY', flag: '🇨🇾', name: 'Cyprus' },
+                { dial: '420',  code: 'CZ', flag: '🇨🇿', name: 'Czech Republic' },
+                { dial: '45',   code: 'DK', flag: '🇩🇰', name: 'Denmark' },
+                { dial: '253',  code: 'DJ', flag: '🇩🇯', name: 'Djibouti' },
+                { dial: '1767', code: 'DM', flag: '🇩🇲', name: 'Dominica' },
+                { dial: '593',  code: 'EC', flag: '🇪🇨', name: 'Ecuador' },
+                { dial: '20',   code: 'EG', flag: '🇪🇬', name: 'Egypt' },
+                { dial: '503',  code: 'SV', flag: '🇸🇻', name: 'El Salvador' },
+                { dial: '240',  code: 'GQ', flag: '🇬🇶', name: 'Equatorial Guinea' },
+                { dial: '291',  code: 'ER', flag: '🇪🇷', name: 'Eritrea' },
+                { dial: '372',  code: 'EE', flag: '🇪🇪', name: 'Estonia' },
+                { dial: '251',  code: 'ET', flag: '🇪🇹', name: 'Ethiopia' },
+                { dial: '500',  code: 'FK', flag: '🇫🇰', name: 'Falkland Islands' },
+                { dial: '298',  code: 'FO', flag: '🇫🇴', name: 'Faroe Islands' },
+                { dial: '679',  code: 'FJ', flag: '🇫🇯', name: 'Fiji' },
+                { dial: '358',  code: 'FI', flag: '🇫🇮', name: 'Finland' },
+                { dial: '33',   code: 'FR', flag: '🇫🇷', name: 'France' },
+                { dial: '594',  code: 'GF', flag: '🇬🇫', name: 'French Guiana' },
+                { dial: '689',  code: 'PF', flag: '🇵🇫', name: 'French Polynesia' },
+                { dial: '241',  code: 'GA', flag: '🇬🇦', name: 'Gabon' },
+                { dial: '220',  code: 'GM', flag: '🇬🇲', name: 'Gambia' },
+                { dial: '995',  code: 'GE', flag: '🇬🇪', name: 'Georgia' },
+                { dial: '49',   code: 'DE', flag: '🇩🇪', name: 'Germany' },
+                { dial: '233',  code: 'GH', flag: '🇬🇭', name: 'Ghana' },
+                { dial: '350',  code: 'GI', flag: '🇬🇮', name: 'Gibraltar' },
+                { dial: '30',   code: 'GR', flag: '🇬🇷', name: 'Greece' },
+                { dial: '299',  code: 'GL', flag: '🇬🇱', name: 'Greenland' },
+                { dial: '1473', code: 'GD', flag: '🇬🇩', name: 'Grenada' },
+                { dial: '590',  code: 'GP', flag: '🇬🇵', name: 'Guadeloupe' },
+                { dial: '1671', code: 'GU', flag: '🇬🇺', name: 'Guam' },
+                { dial: '502',  code: 'GT', flag: '🇬🇹', name: 'Guatemala' },
+                { dial: '44',   code: 'GG', flag: '🇬🇬', name: 'Guernsey' },
+                { dial: '224',  code: 'GN', flag: '🇬🇳', name: 'Guinea' },
+                { dial: '245',  code: 'GW', flag: '🇬🇼', name: 'Guinea-Bissau' },
+                { dial: '592',  code: 'GY', flag: '🇬🇾', name: 'Guyana' },
+                { dial: '509',  code: 'HT', flag: '🇭🇹', name: 'Haiti' },
+                { dial: '504',  code: 'HN', flag: '🇭🇳', name: 'Honduras' },
+                { dial: '852',  code: 'HK', flag: '🇭🇰', name: 'Hong Kong' },
+                { dial: '36',   code: 'HU', flag: '🇭🇺', name: 'Hungary' },
+                { dial: '354',  code: 'IS', flag: '🇮🇸', name: 'Iceland' },
+                { dial: '91',   code: 'IN', flag: '🇮🇳', name: 'India' },
+                { dial: '62',   code: 'ID', flag: '🇮🇩', name: 'Indonesia' },
+                { dial: '98',   code: 'IR', flag: '🇮🇷', name: 'Iran' },
+                { dial: '964',  code: 'IQ', flag: '🇮🇶', name: 'Iraq' },
+                { dial: '353',  code: 'IE', flag: '🇮🇪', name: 'Ireland' },
+                { dial: '44',   code: 'IM', flag: '🇮🇲', name: 'Isle of Man' },
+                { dial: '972',  code: 'IL', flag: '🇮🇱', name: 'Israel' },
+                { dial: '39',   code: 'IT', flag: '🇮🇹', name: 'Italy' },
+                { dial: '1876', code: 'JM', flag: '🇯🇲', name: 'Jamaica' },
+                { dial: '81',   code: 'JP', flag: '🇯🇵', name: 'Japan' },
+                { dial: '44',   code: 'JE', flag: '🇯🇪', name: 'Jersey' },
+                { dial: '962',  code: 'JO', flag: '🇯🇴', name: 'Jordan' },
+                { dial: '7',    code: 'KZ', flag: '🇰🇿', name: 'Kazakhstan' },
+                { dial: '254',  code: 'KE', flag: '🇰🇪', name: 'Kenya' },
+                { dial: '686',  code: 'KI', flag: '🇰🇮', name: 'Kiribati' },
+                { dial: '850',  code: 'KP', flag: '🇰🇵', name: 'Korea (North)' },
+                { dial: '82',   code: 'KR', flag: '🇰🇷', name: 'Korea (South)' },
+                { dial: '965',  code: 'KW', flag: '🇰🇼', name: 'Kuwait' },
+                { dial: '996',  code: 'KG', flag: '🇰🇬', name: 'Kyrgyzstan' },
+                { dial: '856',  code: 'LA', flag: '🇱🇦', name: 'Laos' },
+                { dial: '371',  code: 'LV', flag: '🇱🇻', name: 'Latvia' },
+                { dial: '961',  code: 'LB', flag: '🇱🇧', name: 'Lebanon' },
+                { dial: '266',  code: 'LS', flag: '🇱🇸', name: 'Lesotho' },
+                { dial: '231',  code: 'LR', flag: '🇱🇷', name: 'Liberia' },
+                { dial: '218',  code: 'LY', flag: '🇱🇾', name: 'Libya' },
+                { dial: '423',  code: 'LI', flag: '🇱🇮', name: 'Liechtenstein' },
+                { dial: '370',  code: 'LT', flag: '🇱🇹', name: 'Lithuania' },
+                { dial: '352',  code: 'LU', flag: '🇱🇺', name: 'Luxembourg' },
+                { dial: '853',  code: 'MO', flag: '🇲🇴', name: 'Macao' },
+                { dial: '389',  code: 'MK', flag: '🇲🇰', name: 'Macedonia' },
+                { dial: '261',  code: 'MG', flag: '🇲🇬', name: 'Madagascar' },
+                { dial: '265',  code: 'MW', flag: '🇲🇼', name: 'Malawi' },
+                { dial: '60',   code: 'MY', flag: '🇲🇾', name: 'Malaysia' },
+                { dial: '960',  code: 'MV', flag: '🇲🇻', name: 'Maldives' },
+                { dial: '223',  code: 'ML', flag: '🇲🇱', name: 'Mali' },
+                { dial: '356',  code: 'MT', flag: '🇲🇹', name: 'Malta' },
+                { dial: '692',  code: 'MH', flag: '🇲🇭', name: 'Marshall Islands' },
+                { dial: '596',  code: 'MQ', flag: '🇲🇶', name: 'Martinique' },
+                { dial: '222',  code: 'MR', flag: '🇲🇷', name: 'Mauritania' },
+                { dial: '230',  code: 'MU', flag: '🇲🇺', name: 'Mauritius' },
+                { dial: '262',  code: 'YT', flag: '🇾🇹', name: 'Mayotte' },
+                { dial: '52',   code: 'MX', flag: '🇲🇽', name: 'Mexico' },
+                { dial: '691',  code: 'FM', flag: '🇫🇲', name: 'Micronesia' },
+                { dial: '373',  code: 'MD', flag: '🇲🇩', name: 'Moldova' },
+                { dial: '377',  code: 'MC', flag: '🇲🇨', name: 'Monaco' },
+                { dial: '976',  code: 'MN', flag: '🇲🇳', name: 'Mongolia' },
+                { dial: '382',  code: 'ME', flag: '🇲🇪', name: 'Montenegro' },
+                { dial: '1664', code: 'MS', flag: '🇲🇸', name: 'Montserrat' },
+                { dial: '212',  code: 'MA', flag: '🇲🇦', name: 'Morocco' },
+                { dial: '258',  code: 'MZ', flag: '🇲🇿', name: 'Mozambique' },
+                { dial: '95',   code: 'MM', flag: '🇲🇲', name: 'Myanmar' },
+                { dial: '264',  code: 'NA', flag: '🇳🇦', name: 'Namibia' },
+                { dial: '674',  code: 'NR', flag: '🇳🇷', name: 'Nauru' },
+                { dial: '977',  code: 'NP', flag: '🇳🇵', name: 'Nepal' },
+                { dial: '31',   code: 'NL', flag: '🇳🇱', name: 'Netherlands' },
+                { dial: '687',  code: 'NC', flag: '🇳🇨', name: 'New Caledonia' },
+                { dial: '64',   code: 'NZ', flag: '🇳🇿', name: 'New Zealand' },
+                { dial: '505',  code: 'NI', flag: '🇳🇮', name: 'Nicaragua' },
+                { dial: '227',  code: 'NE', flag: '🇳🇪', name: 'Niger' },
+                { dial: '234',  code: 'NG', flag: '🇳🇬', name: 'Nigeria' },
+                { dial: '683',  code: 'NU', flag: '🇳🇺', name: 'Niue' },
+                { dial: '47',   code: 'NO', flag: '🇳🇴', name: 'Norway' },
+                { dial: '968',  code: 'OM', flag: '🇴🇲', name: 'Oman' },
+                { dial: '92',   code: 'PK', flag: '🇵🇰', name: 'Pakistan' },
+                { dial: '680',  code: 'PW', flag: '🇵🇼', name: 'Palau' },
+                { dial: '970',  code: 'PS', flag: '🇵🇸', name: 'Palestine' },
+                { dial: '507',  code: 'PA', flag: '🇵🇦', name: 'Panama' },
+                { dial: '675',  code: 'PG', flag: '🇵🇬', name: 'Papua New Guinea' },
+                { dial: '595',  code: 'PY', flag: '🇵🇾', name: 'Paraguay' },
+                { dial: '51',   code: 'PE', flag: '🇵🇪', name: 'Peru' },
+                { dial: '63',   code: 'PH', flag: '🇵🇭', name: 'Philippines' },
+                { dial: '48',   code: 'PL', flag: '🇵🇱', name: 'Poland' },
+                { dial: '351',  code: 'PT', flag: '🇵🇹', name: 'Portugal' },
+                { dial: '1787', code: 'PR', flag: '🇵🇷', name: 'Puerto Rico' },
+                { dial: '974',  code: 'QA', flag: '🇶🇦', name: 'Qatar' },
+                { dial: '262',  code: 'RE', flag: '🇷🇪', name: 'Réunion' },
+                { dial: '40',   code: 'RO', flag: '🇷🇴', name: 'Romania' },
+                { dial: '7',    code: 'RU', flag: '🇷🇺', name: 'Russia' },
+                { dial: '250',  code: 'RW', flag: '🇷🇼', name: 'Rwanda' },
+                { dial: '590',  code: 'BL', flag: '🇧🇱', name: 'Saint Barthélemy' },
+                { dial: '290',  code: 'SH', flag: '🇸🇭', name: 'Saint Helena' },
+                { dial: '1869', code: 'KN', flag: '🇰🇳', name: 'Saint Kitts and Nevis' },
+                { dial: '1758', code: 'LC', flag: '🇱🇨', name: 'Saint Lucia' },
+                { dial: '1784', code: 'VC', flag: '🇻🇨', name: 'Saint Vincent and the Grenadines' },
+                { dial: '685',  code: 'WS', flag: '🇼🇸', name: 'Samoa' },
+                { dial: '378',  code: 'SM', flag: '🇸🇲', name: 'San Marino' },
+                { dial: '239',  code: 'ST', flag: '🇸🇹', name: 'Sao Tome and Principe' },
+                { dial: '966',  code: 'SA', flag: '🇸🇦', name: 'Saudi Arabia' },
+                { dial: '221',  code: 'SN', flag: '🇸🇳', name: 'Senegal' },
+                { dial: '381',  code: 'RS', flag: '🇷🇸', name: 'Serbia' },
+                { dial: '248',  code: 'SC', flag: '🇸🇨', name: 'Seychelles' },
+                { dial: '232',  code: 'SL', flag: '🇸🇱', name: 'Sierra Leone' },
+                { dial: '65',   code: 'SG', flag: '🇸🇬', name: 'Singapore' },
+                { dial: '1721', code: 'SX', flag: '🇸🇽', name: 'Sint Maarten' },
+                { dial: '421',  code: 'SK', flag: '🇸🇰', name: 'Slovakia' },
+                { dial: '386',  code: 'SI', flag: '🇸🇮', name: 'Slovenia' },
+                { dial: '677',  code: 'SB', flag: '🇸🇧', name: 'Solomon Islands' },
+                { dial: '252',  code: 'SO', flag: '🇸🇴', name: 'Somalia' },
+                { dial: '27',   code: 'ZA', flag: '🇿🇦', name: 'South Africa' },
+                { dial: '211',  code: 'SS', flag: '🇸🇸', name: 'South Sudan' },
+                { dial: '34',   code: 'ES', flag: '🇪🇸', name: 'Spain' },
+                { dial: '94',   code: 'LK', flag: '🇱🇰', name: 'Sri Lanka' },
+                { dial: '249',  code: 'SD', flag: '🇸🇩', name: 'Sudan' },
+                { dial: '597',  code: 'SR', flag: '🇸🇷', name: 'Suriname' },
+                { dial: '268',  code: 'SZ', flag: '🇸🇿', name: 'Swaziland' },
+                { dial: '46',   code: 'SE', flag: '🇸🇪', name: 'Sweden' },
+                { dial: '41',   code: 'CH', flag: '🇨🇭', name: 'Switzerland' },
+                { dial: '963',  code: 'SY', flag: '🇸🇾', name: 'Syria' },
+                { dial: '886',  code: 'TW', flag: '🇹🇼', name: 'Taiwan' },
+                { dial: '992',  code: 'TJ', flag: '🇹🇯', name: 'Tajikistan' },
+                { dial: '255',  code: 'TZ', flag: '🇹🇿', name: 'Tanzania' },
+                { dial: '66',   code: 'TH', flag: '🇹🇭', name: 'Thailand' },
+                { dial: '670',  code: 'TL', flag: '🇹🇱', name: 'Timor-Leste' },
+                { dial: '228',  code: 'TG', flag: '🇹🇬', name: 'Togo' },
+                { dial: '690',  code: 'TK', flag: '🇹🇰', name: 'Tokelau' },
+                { dial: '676',  code: 'TO', flag: '🇹🇴', name: 'Tonga' },
+                { dial: '1868', code: 'TT', flag: '🇹🇹', name: 'Trinidad and Tobago' },
+                { dial: '216',  code: 'TN', flag: '🇹🇳', name: 'Tunisia' },
+                { dial: '90',   code: 'TR', flag: '🇹🇷', name: 'Turkey' },
+                { dial: '993',  code: 'TM', flag: '🇹🇲', name: 'Turkmenistan' },
+                { dial: '1649', code: 'TC', flag: '🇹🇨', name: 'Turks and Caicos Islands' },
+                { dial: '688',  code: 'TV', flag: '🇹🇻', name: 'Tuvalu' },
+                { dial: '256',  code: 'UG', flag: '🇺🇬', name: 'Uganda' },
+                { dial: '380',  code: 'UA', flag: '🇺🇦', name: 'Ukraine' },
+                { dial: '971',  code: 'AE', flag: '🇦🇪', name: 'United Arab Emirates' },
+                { dial: '44',   code: 'GB', flag: '🇬🇧', name: 'United Kingdom' },
+                { dial: '1',    code: 'US', flag: '🇺🇸', name: 'United States' },
+                { dial: '598',  code: 'UY', flag: '🇺🇾', name: 'Uruguay' },
+                { dial: '998',  code: 'UZ', flag: '🇺🇿', name: 'Uzbekistan' },
+                { dial: '678',  code: 'VU', flag: '🇻🇺', name: 'Vanuatu' },
+                { dial: '58',   code: 'VE', flag: '🇻🇪', name: 'Venezuela' },
+                { dial: '84',   code: 'VN', flag: '🇻🇳', name: 'Vietnam' },
+                { dial: '1284', code: 'VG', flag: '🇻🇬', name: 'Virgin Islands (British)' },
+                { dial: '1340', code: 'VI', flag: '🇻🇮', name: 'Virgin Islands (US)' },
+                { dial: '681',  code: 'WF', flag: '🇼🇫', name: 'Wallis and Futuna' },
+                { dial: '967',  code: 'YE', flag: '🇾🇪', name: 'Yemen' },
+                { dial: '260',  code: 'ZM', flag: '🇿🇲', name: 'Zambia' },
+                { dial: '263',  code: 'ZW', flag: '🇿🇼', name: 'Zimbabwe' },
+            ];
+        },
+
+        detectCountryFromNumber(number) {
+            if (!number) return null;
+            let clean = String(number).replace(/[^0-9]/g, '');
+
+            // ── Normalize local-format numbers to international ──
+            // Pakistan local: 03xxxxxxxxx  →  923xxxxxxxxx
+            if (clean.startsWith('03') && clean.length >= 10) {
+                clean = '92' + clean.slice(1); // 03xx → 923xx
+            }
+            // Handle 00-prefix international notation: 0092xx → 92xx
+            if (clean.startsWith('00')) {
+                clean = clean.slice(2);
+            }
+
+            // Sort by dial code length descending — longest match wins
+            const sorted = [...this.COUNTRY_DATA].sort((a, b) => b.dial.length - a.dial.length);
+            for (const c of sorted) {
+                if (clean.startsWith(c.dial)) return c;
+            }
+            return null;
+        },
+
+        getCountryFlagAndLocalTime(number) {
+            const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+            if (!number) {
+                return { flag: '🌐', code: '??', time: timeStr };
+            }
+            try {
+                const country = this.detectCountryFromNumber(number);
+                const flag  = country ? country.flag : '🌐';
+                const code  = country ? country.code : '??';
+                return { flag, code, time: timeStr };
+            } catch (err) {
+                console.error('[Softphone] getCountryFlagAndLocalTime error:', err);
+                return { flag: '🌐', code: '??', time: timeStr };
+            }
+        },
+
+        sendDTMF(digit) {
+            const call = Object.values(this.ziwoActiveCalls)[0];
+            if (call && typeof call.sendDTMF === 'function') {
+                try {
+                    call.sendDTMF(digit);
+                    console.log('[ZIWO SDK] Sent DTMF tone:', digit);
+                } catch (e) {
+                    console.error('[ZIWO SDK] Failed to send DTMF tone:', e);
+                }
+            } else {
+                console.log('[ZIWO SDK] Mock DTMF tone keypress:', digit);
+            }
         },
 
         handleCallBroadcast(e) {
             // Live broadcast handler
             if (e.agent_id && e.agent_id !== {{ auth()->id() }}) return;
-            
+
             console.log('Call Broadcast received:', e);
+            // Trigger an immediate status check for real-time responsiveness
             this.phoneCheckStatus();
         },
 
         handleAgentBroadcast(e) {
             if (e.user_id === {{ auth()->id() }}) {
-                this.phoneStatus = e.status;
+                // If agent status changed to ringing_inbound, start ring immediately
+                if (e.status === 'ringing_inbound' && this.phoneStatus !== 'ringing_inbound') {
+                    this.phoneStatus = 'ringing_inbound';
+                    if (this.phoneCollapsed) this.togglePhoneCollapse();
+                    this.startRinging();
+                } else if (e.status !== 'ringing_inbound') {
+                    this.stopRinging();
+                    // In SDK mode, the backend status is always stale for in-progress WebRTC calls.
+                    // Only allow status overwrite if not currently in an active SDK call state.
+                    const sdkCallActive = ['ringing', 'ringing_inbound', 'speaking', 'held'].includes(this.phoneStatus);
+                    if (!sdkCallActive || this.isMockMode) {
+                        this.phoneStatus = e.status;
+                    }
+                }
                 this.phoneCheckStatus();
+            }
+        },
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // RING AUDIO — Official ZIWO Ringtone
+        // Uses: https://static.ziwo.io/audio/ringtone.mp3
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+        startRinging() {
+            this.stopRinging(); // Reset any previous playback
+
+            const audioEl = document.getElementById('ring-audio');
+            if (!audioEl) return;
+
+            // Ensure correct src is set (in case element was created without it)
+            if (!audioEl.src || audioEl.src === window.location.href) {
+                audioEl.src = 'https://static.ziwo.io/audio/ringtone.mp3';
+            }
+
+            audioEl.currentTime = 0;
+            audioEl.loop = true;
+            audioEl.volume = 1.0;
+
+            const playPromise = audioEl.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(err => {
+                    // Autoplay was blocked by browser policy — retry on next user interaction
+                    console.warn('Ringtone autoplay blocked. Will retry on next interaction.', err);
+                    const unlockRing = () => {
+                        audioEl.play().catch(() => {});
+                        document.removeEventListener('click', unlockRing);
+                        document.removeEventListener('keydown', unlockRing);
+                    };
+                    document.addEventListener('click', unlockRing, { once: true });
+                    document.addEventListener('keydown', unlockRing, { once: true });
+                });
+            }
+        },
+
+        stopRinging() {
+            const audioEl = document.getElementById('ring-audio');
+            if (audioEl) {
+                audioEl.pause();
+                audioEl.currentTime = 0;
+            }
+        },
+
+        playEndCallTone() {
+            const endCallAudioEl = document.getElementById('end-call-audio');
+            if (endCallAudioEl) {
+                endCallAudioEl.currentTime = 0;
+                endCallAudioEl.volume = 1.0;
+                endCallAudioEl.play().catch(err => {
+                    console.warn('End call tone autoplay blocked:', err);
+                });
+            }
+        },
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // KEYBOARD HANDLER FOR DIALER
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        handleDialerKey(event) {
+            if (!event || !event.key) return;
+            const validKeys = ['0','1','2','3','4','5','6','7','8','9','*','#','+'];
+            if (validKeys.includes(event.key)) {
+                // Allow native input
+                return;
+            }
+            if (event.key === 'Backspace' || event.key === 'Delete') {
+                // Allow native backspace
+                return;
+            }
+            // Block all other keys (letters, etc.) except control keys
+            if (!event.ctrlKey && !event.metaKey && event.key.length === 1) {
+                event.preventDefault();
             }
         }
     };

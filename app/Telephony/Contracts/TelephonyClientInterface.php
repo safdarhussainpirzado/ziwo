@@ -40,10 +40,12 @@ interface TelephonyClientInterface
     public function hangupCall(string $agentToken, string $callId): array;
 
     /**
-     * Transfer active call to another agent or phone number.
-     * Type can be 'blind' or 'warm' (attended).
-     */
     public function transferCall(string $agentToken, string $callId, string $targetNumber, string $type = 'blind'): array;
+
+    /**
+     * Merge call or initiate a conference call with another target number.
+     */
+    public function conferenceCall(string $agentToken, string $callId, string $targetNumber): array;
 
     /**
      * Pause or resume call recording.
@@ -59,4 +61,10 @@ interface TelephonyClientInterface
      * Retrieve current API health status.
      */
     public function getHealthStatus(): bool;
+
+    /**
+     * Look up a CRM customer record by phone number.
+     * Uses the ZIWO CRM API: GET /agent/crm/customers?phone={phone}
+     */
+    public function lookupCrmCustomer(string $agentToken, string $phone): array;
 }

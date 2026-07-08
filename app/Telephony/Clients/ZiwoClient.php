@@ -21,18 +21,22 @@ class ZiwoClient implements TelephonyClientInterface
     }
 
     /**
-     * Helper to construct the proxied ZIWO API URL.
+     * Helper to construct the ZIWO API URL.
+     *
+     * The proxy URL (e.g. https://nayatel-api.aswat.co) IS the full API base —
+     * we do NOT double-wrap it with api.ziwo.io. Endpoints are appended directly.
      */
     protected function buildUrl(string $endpoint): string
     {
         $endpoint = ltrim($endpoint, '/');
-        $fullZiwoUrl = "{$this->baseUrl}/{$endpoint}";
-        
+
+        // Use proxy as primary base (contact-center-specific API gateway)
         if (!empty($this->proxyUrl)) {
-            return "{$this->proxyUrl}/{$fullZiwoUrl}";
+            return "{$this->proxyUrl}/{$endpoint}";
         }
-        
-        return $fullZiwoUrl;
+
+        // Fallback to direct ZIWO API
+        return "{$this->baseUrl}/{$endpoint}";
     }
 
     /**
@@ -67,6 +71,16 @@ class ZiwoClient implements TelephonyClientInterface
             }
 
             Log::error("ZIWO Telephony Client API Error: [{$response->status()}] URL: {$url} Response: {$response->body()}");
+            
+            if ($response->clientError()) {
+                $body = $response->json();
+                return [
+                    'result' => false,
+                    'status' => 'error',
+                    'message' => $body['error']['message'] ?? $body['message'] ?? $body['content']['message'] ?? "Telephony gateway returned error status {$response->status()}"
+                ];
+            }
+
             throw new Exception("Telephony gateway returned error status {$response->status()}");
         } catch (Exception $e) {
             Log::error("ZIWO Telephony Client Connection Failure: {$e->getMessage()}");
@@ -79,10 +93,28 @@ class ZiwoClient implements TelephonyClientInterface
 
     public function login(string $username, string $password): array
     {
-        return $this->request('POST', 'users/login', [
+        $response = $this->request('POST', 'auth/login', [
             'username' => $username,
             'password' => $password,
         ]);
+
+        // Map successful ZIWO auth response structure
+        if (($response['result'] ?? false) === true && !empty($response['content']['access_token'])) {
+            return [
+                'status' => 'success',
+                'access_token' => $response['content']['access_token'],
+                'expires_in' => 28800, // 8 hours default session expiration
+                'user' => [
+                    'username' => $response['content']['username'] ?? $username,
+                    'extension' => $response['content']['ccLogin'] ?? ''
+                ]
+            ];
+        }
+
+        return [
+            'status' => 'error',
+            'message' => $response['message'] ?? 'Authentication failed'
+        ];
     }
 
     public function clickToCall(string $agentToken, string $customerNumber): array
@@ -126,6 +158,14 @@ class ZiwoClient implements TelephonyClientInterface
         ], $agentToken);
     }
 
+    public function conferenceCall(string $agentToken, string $callId, string $targetNumber): array
+    {
+        return $this->request('POST', "calls/conference", [
+            'call_id' => $callId,
+            'target' => $targetNumber,
+        ], $agentToken);
+    }
+
     public function toggleRecording(string $agentToken, string $callId, bool $pause): array
     {
         $endpoint = $pause ? "calls/{$callId}/recording/pause" : "calls/{$callId}/recording/resume";
@@ -152,6 +192,45 @@ class ZiwoClient implements TelephonyClientInterface
         }
     }
 
+    public function lookupCrmCustomer(string $agentToken, string $phone): array
+    {
+        // CRM API lives at proxyUrl/agent/crm/customers (not under /v1)
+        $crmBaseUrl = rtrim($this->proxyUrl ?: $this->baseUrl, '/');
+        $url = "{$crmBaseUrl}/agent/crm/customers";
+
+        if ($this->isMock) {
+            return [
+                'result'  => true,
+                'content' => [],
+                'info'    => []
+            ];
+        }
+
+        try {
+            $response = Http::withHeaders([
+                'Accept'       => 'application/json',
+                'access_token' => $agentToken,
+            ])
+            ->timeout(5)
+            ->get($url, [
+                'phone' => $phone,
+                'order' => 'name',
+                'limit' => 1,
+                'skip'  => 0,
+            ]);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::warning("ZIWO CRM lookup failed [{$response->status()}] for phone {$phone}");
+            return ['result' => false, 'content' => [], 'info' => []];
+        } catch (Exception $e) {
+            Log::error("ZIWO CRM customer lookup exception: {$e->getMessage()}");
+            return ['result' => false, 'content' => [], 'info' => []];
+        }
+    }
+
     /**
      * Generate structured mock responses for simulated mode.
      */
@@ -159,14 +238,13 @@ class ZiwoClient implements TelephonyClientInterface
     {
         $endpointClean = rtrim($endpoint, '/');
         
-        if (str_contains($endpointClean, 'users/login')) {
+        if (str_contains($endpointClean, 'users/login') || str_contains($endpointClean, 'auth/login')) {
             return [
-                'status' => 'success',
-                'access_token' => 'mock_ziwo_token_' . bin2hex(random_bytes(16)),
-                'expires_in' => 3600,
-                'user' => [
+                'result' => true,
+                'content' => [
+                    'access_token' => 'mock_ziwo_token_' . bin2hex(random_bytes(16)),
                     'username' => $data['username'] ?? 'agent_mock',
-                    'extension' => '1001'
+                    'ccLogin' => '1001'
                 ]
             ];
         }
@@ -199,6 +277,10 @@ class ZiwoClient implements TelephonyClientInterface
 
         if (str_contains($endpointClean, 'transfer')) {
             return ['status' => 'success', 'message' => 'Call transfer initiated'];
+        }
+
+        if (str_contains($endpointClean, 'conference')) {
+            return ['status' => 'success', 'message' => 'Conference call initiated'];
         }
 
         if (str_contains($endpointClean, 'recording')) {

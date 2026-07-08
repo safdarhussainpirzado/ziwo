@@ -44,10 +44,12 @@ class TelephonyService implements TelephonyServiceInterface
                 broadcast(new AgentStatusChanged($user, 'online'))->toOthers();
 
                 return [
-                    'status' => 'success',
-                    'token' => $response['access_token'],
+                    'status'       => 'success',
+                    'access_token' => $response['access_token'], // for frontend SDK init
+                    'token'        => $response['access_token'],
+                    'ziwo_username' => $username,
                     'agent_status' => 'online',
-                    'message' => 'Authenticated successfully with telephony gateway'
+                    'message'      => 'Authenticated successfully with telephony gateway'
                 ];
             }
 
@@ -196,6 +198,42 @@ class TelephonyService implements TelephonyServiceInterface
         }
     }
 
+    public function conference(int $userId, string $callId, string $targetNumber): array
+    {
+        $config = $this->repository->getAgentConfig($userId);
+        if (!$config || empty($config->ziwo_token)) {
+            return ['status' => 'error', 'message' => 'Agent not authenticated'];
+        }
+
+        try {
+            $response = $this->client->conferenceCall($config->ziwo_token, $callId, $targetNumber);
+
+            if (($response['status'] ?? '') === 'success') {
+                $call = $this->repository->getCallByZiwoId($callId);
+                if ($call) {
+                    $dto = new CallLogDTO(
+                        callId: $callId,
+                        callUuid: $call->call_uuid,
+                        agentId: $userId,
+                        callerNumber: $call->caller_number,
+                        direction: $call->direction,
+                        status: 'conference',
+                        metadata: array_merge($call->metadata ?? [], ['conference_participants' => [$targetNumber]])
+                    );
+                    $updatedCall = $this->repository->logCall($dto);
+                    broadcast(new CallStatusUpdated($updatedCall))->toOthers();
+                }
+
+                return ['status' => 'success', 'message' => 'Conference call initiated'];
+            }
+
+            throw new Exception($response['message'] ?? 'Conference request failed');
+        } catch (Exception $e) {
+            Log::error("TelephonyService Conference Error: {$e->getMessage()}");
+            return ['status' => 'error', 'message' => $e->getMessage()];
+        }
+    }
+
     public function toggleCallRecording(int $userId, string $callId, bool $pause): array
     {
         $action = $pause ? 'Pause recording' : 'Resume recording';
@@ -239,6 +277,26 @@ class TelephonyService implements TelephonyServiceInterface
                 case 'call.ringing':
                     $status = 'ringing';
                     $startTime = now();
+                    // Attempt CRM lookup if number is present and agent token is available
+                    if ($callerNumber && $agentId) {
+                        $config = $this->repository->getAgentConfig($agentId);
+                        if ($config && !empty($config->ziwo_token)) {
+                            try {
+                                $crmData = $this->client->lookupCrmCustomer($config->ziwo_token, $callerNumber);
+                                if (!empty($crmData['result']) && !empty($crmData['content'][0])) {
+                                    $cust = $crmData['content'][0];
+                                    $firstName = $cust['firstName'] ?? '';
+                                    $lastName = $cust['lastName'] ?? '';
+                                    $fullName = trim($firstName . ' ' . $lastName);
+                                    if ($fullName !== '') {
+                                        $metadata['caller_name'] = $fullName;
+                                    }
+                                }
+                            } catch (Exception $crmEx) {
+                                Log::warning("CRM customer lookup during webhook processing failed: " . $crmEx->getMessage());
+                            }
+                        }
+                    }
                     break;
                 case 'call.answered':
                     $status = 'active';
@@ -357,7 +415,12 @@ class TelephonyService implements TelephonyServiceInterface
                 
                 if ($call) {
                     $endTime = $setEndTime ? now() : $call->end_time;
-                    $duration = $setEndTime ? now()->diffInSeconds($call->start_time) : $call->duration_seconds;
+                    $duration = 0;
+                    if ($setEndTime && $call->start_time) {
+                        $duration = max(0, now()->diffInSeconds($call->start_time));
+                    } elseif ($call->duration_seconds) {
+                        $duration = $call->duration_seconds;
+                    }
 
                     $dto = new CallLogDTO(
                         callId: $callId,
