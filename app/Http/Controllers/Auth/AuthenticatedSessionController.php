@@ -39,8 +39,32 @@ class AuthenticatedSessionController extends Controller
 
         // User role-based dynamic landing page
         $user = auth()->user();
+        $landingPage = $user->getLandingPageRoute();
 
-        return redirect()->intended($user->getLandingPageRoute());
+        // ── Guard: never redirect to API/JSON endpoints as the landing page ──
+        // AJAX polling requests (e.g. /telephony/status) can accidentally set the
+        // "intended" URL in the session when the session expires mid-poll.
+        // Detect these by checking the stored intended URL against known API prefixes.
+        $intendedUrl = $request->session()->get('url.intended', '');
+        $apiPrefixes = ['/telephony/', '/api/', '/ajax/'];
+        $intendedIsApi = false;
+        if ($intendedUrl) {
+            $intendedPath = parse_url($intendedUrl, PHP_URL_PATH) ?? '';
+            foreach ($apiPrefixes as $prefix) {
+                if (str_starts_with($intendedPath, $prefix)) {
+                    $intendedIsApi = true;
+                    break;
+                }
+            }
+        }
+
+        if ($intendedIsApi) {
+            // Discard the API intended URL and go straight to landing page
+            $request->session()->forget('url.intended');
+            return redirect()->to($landingPage);
+        }
+
+        return redirect()->intended($landingPage);
     }
 
     public function destroy(Request $request): RedirectResponse

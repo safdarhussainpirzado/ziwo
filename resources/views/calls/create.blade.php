@@ -959,6 +959,12 @@ input:focus, textarea:focus, button:focus-visible {
                                         <span class="text-white/40"> · tap to resume</span>
                                     </div>
                                 </div>
+                                <!-- Mute/Unmute held participant -->
+                                <button type="button" @click.stop="toggleMuteHeldCall(p)"
+                                        class="w-6 h-6 rounded-full flex items-center justify-center transition flex-shrink-0 bg-white/10 hover:bg-white/20 text-white"
+                                        :title="p.is_muted ? 'Unmute' : 'Mute'">
+                                    <i class="fa-solid text-[9px]" :class="p.is_muted ? 'fa-microphone-slash text-rose-400' : 'fa-microphone'"></i>
+                                </button>
                                 <!-- Disconnect held call button -->
                                 <button type="button" @click.stop="hangupHeldCall(p)"
                                         class="ml-1 w-6 h-6 rounded-full bg-rose-600/70 hover:bg-rose-500 flex items-center justify-center text-white transition flex-shrink-0"
@@ -983,7 +989,13 @@ input:focus, textarea:focus, button:focus-visible {
                         
                         <!-- Flag + Time pill -->
                         <div class="inline-flex items-center gap-1.5 bg-black/30 border border-white/10 rounded-full px-3.5 py-1 text-[11px] text-white">
-                            <span x-text="getCountryFlagAndLocalTime(currentCall.caller_number).code + ' ' + getCountryFlagAndLocalTime(currentCall.caller_number).flag"></span>
+                            <span x-text="getCountryFlagAndLocalTime(currentCall.caller_number).code"></span>
+                            <template x-if="['PK', 'US', 'GB', 'AE', 'SA'].includes(getCountryFlagAndLocalTime(currentCall.caller_number).code)">
+                                <img :src="'/images/flags/' + getCountryFlagAndLocalTime(currentCall.caller_number).code.toLowerCase() + '.svg'" class="w-4.5 h-3 rounded-sm object-cover">
+                            </template>
+                            <template x-if="!['PK', 'US', 'GB', 'AE', 'SA'].includes(getCountryFlagAndLocalTime(currentCall.caller_number).code)">
+                                <span x-text="getCountryFlagAndLocalTime(currentCall.caller_number).flag"></span>
+                            </template>
                             <span class="font-extrabold" x-text="getCountryFlagAndLocalTime(currentCall.caller_number).time"></span>
                             <span class="opacity-80">local time</span>
                         </div>
@@ -1010,7 +1022,8 @@ input:focus, textarea:focus, button:focus-visible {
                         <!-- Clear/Reset Button for recovery of stuck screens -->
                         <div class="flex justify-center mt-2">
                             <button type="button" @click="phoneResetUI()" 
-                                    class="text-[9px] text-white/20 hover:text-white/60 transition bg-white/5 px-2.5 py-1 rounded-md border border-white/10">
+                                    style="background: linear-gradient(135deg, #d97706, #b45309) !important; border: 1px solid #f59e0b !important;"
+                                    class="text-[10px] text-white hover:opacity-90 font-bold px-3.5 py-1.5 rounded-lg shadow-md transition active:scale-95">
                                 Reset Softphone
                             </button>
                         </div>
@@ -1089,7 +1102,7 @@ input:focus, textarea:focus, button:focus-visible {
                     </div>
 
                     <!-- Inline Transfer Panel Overlay -->
-                    <div x-show="transferPanelOpen" class="absolute inset-0 bg-slate-950/98 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
+                    <div x-show="transferPanelOpen" style="background-color: #0b0f19 !important;" class="absolute inset-0 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
                         <div class="text-center">
                             <i class="fa-solid fa-share-nodes text-indigo-500 text-2xl mb-1"></i>
                             <h5 class="font-bold text-xs text-slate-200">Call Transfer Protocol</h5>
@@ -1204,13 +1217,21 @@ input:focus, textarea:focus, button:focus-visible {
                                         <!-- Flag button (opens country picker) -->
                                         <button type="button" @click="addOrCallSearch=''; addOrCallCountryPickerOpen = true"
                                                 class="flex items-center gap-1.5 shrink-0 hover:opacity-80 transition">
-                                            <span class="text-xl leading-none" x-text="addOrCallSelectedCountry.flag"></span>
+                                            <template x-if="['PK', 'US', 'GB', 'AE', 'SA'].includes(addOrCallSelectedCountry.code)">
+                                                <img :src="'/images/flags/' + addOrCallSelectedCountry.code.toLowerCase() + '.svg'" class="w-5 h-3.5 rounded-sm object-cover">
+                                            </template>
+                                            <template x-if="!['PK', 'US', 'GB', 'AE', 'SA'].includes(addOrCallSelectedCountry.code)">
+                                                <span class="text-xl leading-none" x-text="addOrCallSelectedCountry.flag"></span>
+                                            </template>
                                             <span class="text-[10px] text-slate-300 font-bold" x-text="addOrCallSelectedCountry.code"></span>
                                             <i class="fa-solid fa-chevron-down text-[8px] text-slate-500"></i>
                                         </button>
                                         <div class="w-px h-5 bg-slate-700"></div>
                                         <!-- Number -->
-                                        <div class="flex-1 font-mono text-sm text-white tracking-widest truncate" x-text="addOrCallInput || ''"></div>
+                                        <input type="text" x-model="addOrCallInput"
+                                               @keydown="handleDialerKey($event)"
+                                               placeholder="Dial number..."
+                                               class="bg-transparent flex-1 font-mono text-sm text-white tracking-widest outline-none border-none">
                                         <!-- Backspace -->
                                         <button type="button" @click="addOrCallKeypad('backspace')" class="text-slate-400 hover:text-white transition ml-1">
                                             <i class="fa-solid fa-delete-left text-sm"></i>
@@ -1231,7 +1252,7 @@ input:focus, textarea:focus, button:focus-visible {
                                     <button type="button"
                                             @click="executeAddToCall(addOrCallInput, addOrCallInput)"
                                             :disabled="addOrCallInput.length < 4"
-                                            class="w-full py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded-xl transition active:scale-95">
+                                            style="background: linear-gradient(135deg, #a21caf, #d946ef) !important;" class="w-full py-2.5 disabled:opacity-40 disabled:cursor-not-allowed text-white text-[11px] font-bold rounded-xl transition active:scale-95">
                                         Add to the call
                                     </button>
                                 </div>
@@ -1258,7 +1279,12 @@ input:focus, textarea:focus, button:focus-visible {
                                                     <div class="flex-1 text-left min-w-0">
                                                         <div class="text-xs font-semibold text-slate-200 truncate" x-text="contact.name"></div>
                                                         <div class="text-[10px] text-slate-500 truncate">
-                                                            <span x-text="getCountryFlagAndLocalTime(contact.phone_number).flag"></span>
+                                                            <template x-if="['PK', 'US', 'GB', 'AE', 'SA'].includes(getCountryFlagAndLocalTime(contact.phone_number).code)">
+                                                                <img :src="'/images/flags/' + getCountryFlagAndLocalTime(contact.phone_number).code.toLowerCase() + '.svg'" class="w-4 h-3 rounded-sm inline-block object-cover mr-1">
+                                                            </template>
+                                                            <template x-if="!['PK', 'US', 'GB', 'AE', 'SA'].includes(getCountryFlagAndLocalTime(contact.phone_number).code)">
+                                                                <span x-text="getCountryFlagAndLocalTime(contact.phone_number).flag"></span>
+                                                            </template>
                                                             <span class="ml-1" x-text="contact.phone_number"></span>
                                                         </div>
                                                     </div>
@@ -1318,7 +1344,7 @@ input:focus, textarea:focus, button:focus-visible {
                     </div>
 
                     <!-- Inline Keypad Panel Overlay -->
-                    <div x-show="keypadPanelOpen" class="absolute inset-0 bg-slate-950/98 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
+                    <div x-show="keypadPanelOpen" style="background-color: #0b0f19 !important;" class="absolute inset-0 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
                         <div class="text-center">
                             <i class="fa-solid fa-table-cells text-indigo-500 text-2xl mb-1"></i>
                             <h5 class="font-bold text-xs text-slate-200">Keypad / DTMF</h5>
@@ -1516,10 +1542,10 @@ input:focus, textarea:focus, button:focus-visible {
 </div>
 
 <!-- ZIWO Inbound Ringtone (official ZIWO ringtone, looped) -->
-<audio id="ring-audio" src="https://static.ziwo.io/audio/ringtone.mp3" loop preload="auto" style="display:none"></audio>
+<audio id="ring-audio" src="{{ asset('audio/ringtone.mp3') }}" loop preload="auto" style="display:none"></audio>
 
 <!-- ZIWO End Call Notification (official ZIWO end call tone) -->
-<audio id="end-call-audio" src="https://static.ziwo.io/audio/end_call_notification.mp3" preload="auto" style="display:none"></audio>
+<audio id="end-call-audio" src="{{ asset('audio/end_call_notification.mp3') }}" preload="auto" style="display:none"></audio>
 
 <!-- ZIWO WebRTC Audio stream (required by ziwo-core-front SDK — binds the call audio) -->
 <audio id="ziwo-peer-audio" autoplay playsinline style="display:none"></audio>
@@ -1528,7 +1554,7 @@ input:focus, textarea:focus, button:focus-visible {
 
 @push('scripts')
 {{-- ZIWO Core Frontend SDK (WebSocket/Verto — powers real-time call events) --}}
-<script src="https://cdn.jsdelivr.net/npm/ziwo-core-front@1.0.13/dist/ziwo-core-front.umd.js"></script>
+<script src="{{ asset('js/ziwo-core-front.umd.js') }}"></script>
 
 <script>
 function intakeComponent() {
@@ -1599,6 +1625,7 @@ function intakeComponent() {
         ziwoContactCenter: 'nayatel', // Contact center name for SDK
         ziwoSdkClient: null,          // ziwo-core-front ZiwoClient instance
         ziwoActiveCalls: {},          // Live call objects from SDK, keyed by callId
+        ziwoDataLoaded: false,
         phoneAuthForm: {
             username: '',
             password: ''
@@ -1636,7 +1663,7 @@ function intakeComponent() {
         addOrCallDialpadOpen: false, // show numeric dialpad inside panel
         addOrCallInput: '',          // typed number in panel dialpad
         addOrCallCountryPickerOpen: false, // flag/country picker
-        addOrCallSelectedCountry: { name: 'Pakistan', flag: '🇵🇰', dial: '+92', code: 'PK' },
+        addOrCallSelectedCountry: { name: 'Pakistan', flag: '🇵🇰', dial: '92', code: 'PK' },
 
         // Held-call participants (previous callers put on hold for conference)
         heldParticipants: [],  // [{number, name, flag, duration, direction, heldAt, id}]
@@ -2150,7 +2177,15 @@ function intakeComponent() {
 
         phoneResetUI() {
             console.log('[Softphone] Manually resetting softphone UI state');
+            if (this.currentCall && this.currentCall.id) {
+                fetch('/telephony/hangup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                    body: JSON.stringify({ call_id: this.currentCall.id })
+                }).catch(() => {});
+            }
             this.phoneStatus = 'online';
+            this.phoneTab = 'dialer';
             this.stopCallTimer();
             this.stopRinging();
             this.ziwoActiveCalls = {};
@@ -2172,13 +2207,24 @@ function intakeComponent() {
 
         async phoneCheckStatus() {
             try {
-                const res = await fetch('/telephony/status');
+                const res = await fetch('/telephony/status', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
                 if (!res.ok) return;
                 const data = await res.json();
 
                 this.phoneAuthenticated = data.is_authenticated;
                 this.ziwoUsername = data.ziwo_username || '';
                 this.isMockMode = data.is_mock || false;
+
+                // ── Load real queues/teammates if authenticated and not loaded yet ──
+                if (this.phoneAuthenticated) {
+                    if (!this.ziwoDataLoaded) {
+                        this.ziwoDataLoaded = true;
+                        this.fetchZiwoQueues();
+                        this.fetchZiwoTeammates();
+                    }
+                } else {
+                    this.ziwoDataLoaded = false;
+                }
 
                 // ── Token / SDK init (runs once on page-load or re-auth) ──
                 if (data.ziwo_token && !this.ziwoToken) {
@@ -2252,6 +2298,32 @@ function intakeComponent() {
                 }
             } catch (e) {
                 console.error('Telephony status check failed:', e);
+            }
+        },
+
+        async fetchZiwoQueues() {
+            try {
+                const res = await fetch('/telephony/queues', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.mockQueues = data.queues;
+                }
+            } catch (err) {
+                console.error('[ZIWO] Failed to fetch queues:', err);
+            }
+        },
+
+        async fetchZiwoTeammates() {
+            try {
+                const res = await fetch('/telephony/teammates', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.mockTeammates = data.teammates;
+                }
+            } catch (err) {
+                console.error('[ZIWO] Failed to fetch teammates:', err);
             }
         },
 
@@ -2966,6 +3038,12 @@ function intakeComponent() {
         async switchToHeldCall(participant) {
             if (!participant || !participant.id) return;
 
+            // If we are currently dialing/ringing a new leg, cancel/hang it up first
+            if (this.phoneStatus === 'ringing') {
+                console.log('[Softphone] Canceling current dialing/ringing outbound call before switching back.');
+                await this.phoneHangup();
+            }
+
             // 1. Snapshot current call to place it on hold
             const currentId     = this.currentCall.id;
             const currentNum    = this.currentCall.caller_number;
@@ -3039,6 +3117,27 @@ function intakeComponent() {
         },
 
         // ── Disconnect a held call (× button on held card) ──────────────
+        toggleMuteHeldCall(p) {
+            p.is_muted = !p.is_muted;
+            const call = this.ziwoActiveCalls[p.id];
+            if (call) {
+                try {
+                    if (p.is_muted) {
+                        if (typeof call.mute === 'function') call.mute();
+                    } else {
+                        if (typeof call.unmute === 'function') call.unmute();
+                    }
+                } catch (err) {
+                    console.warn('[ZIWO] Mute held call failed:', err);
+                }
+            }
+            fetch(p.is_muted ? '/telephony/mute' : '/telephony/unmute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                body: JSON.stringify({ call_id: p.id })
+            }).catch(() => {});
+        },
+
         async hangupHeldCall(participant) {
             if (!participant || !participant.id) return;
             const sdkCall = this.ziwoActiveCalls[participant.id];
@@ -3144,7 +3243,7 @@ function intakeComponent() {
         // ─── Add or Call Panel logic ───
 
         openAddOrCallPanel() {
-            this.addOrCallInput = '+' + this.addOrCallSelectedCountry.dial;
+            this.addOrCallInput = '+' + String(this.addOrCallSelectedCountry.dial).replace('+', '');
             this.addOrCallSearch = '';
             this.addOrCallDialpadOpen = false;
             this.addOrCallCountryPickerOpen = false;
@@ -3325,7 +3424,7 @@ function intakeComponent() {
                 if (this.phoneSearchQuery) params.append('query', this.phoneSearchQuery);
                 if (this.phoneCategoryFilter) params.append('category', this.phoneCategoryFilter);
 
-                const response = await fetch(`/telephony/phonebook?${params.toString()}`);
+                const response = await fetch(`/telephony/phonebook?${params.toString()}`, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
                 if (response.ok) {
                     const data = await response.json();
                     // Backend returns {status, contacts:[...]} or a plain array
@@ -3794,7 +3893,7 @@ function intakeComponent() {
 
             // Ensure correct src is set (in case element was created without it)
             if (!audioEl.src || audioEl.src === window.location.href) {
-                audioEl.src = 'https://static.ziwo.io/audio/ringtone.mp3';
+                audioEl.src = "{{ asset('audio/ringtone.mp3') }}";
             }
 
             audioEl.currentTime = 0;

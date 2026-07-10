@@ -118,6 +118,8 @@ Route::middleware('auth')->group(function () {
         Route::post('/transfer', [\App\Http\Controllers\TelephonyController::class, 'transfer'])->name('transfer');
         Route::post('/conference', [\App\Http\Controllers\TelephonyController::class, 'conference'])->name('conference');
         Route::post('/recording', [\App\Http\Controllers\TelephonyController::class, 'toggleRecording'])->name('recording');
+        Route::get('/queues', [\App\Http\Controllers\TelephonyController::class, 'getQueues'])->name('queues');
+        Route::get('/teammates', [\App\Http\Controllers\TelephonyController::class, 'getTeammates'])->name('teammates');
         
         // Centralized Phonebook
         Route::get('/phonebook', [\App\Http\Controllers\TelephonyController::class, 'searchPhonebook'])->name('phonebook.search');
