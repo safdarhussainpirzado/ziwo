@@ -940,37 +940,87 @@ input:focus, textarea:focus, button:focus-visible {
                         </div>
                     </div>
 
-                    <!-- Held participants banner — tap to switch, × to disconnect -->
-                    <div x-show="heldParticipants.length > 0" class="shrink-0 space-y-1.5">
-                        <template x-for="(p, idx) in heldParticipants" :key="idx">
-                            <div class="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2 cursor-pointer hover:bg-black/60 transition group"
-                                 @click="switchToHeldCall(p)">
-                                <!-- Resume icon on hover -->
-                                <div class="w-8 h-8 rounded-full bg-white/20 group-hover:bg-emerald-500/60 flex items-center justify-center text-white flex-shrink-0 transition">
-                                    <i class="fa-solid fa-play text-[10px] hidden group-hover:block"></i>
-                                    <i class="fa-solid fa-user text-xs group-hover:hidden"></i>
-                                </div>
-                                <!-- Info -->
-                                <div class="flex-1 min-w-0">
-                                    <div class="text-[11px] font-bold text-white truncate" x-text="p.name"></div>
-                                    <div class="text-[9px] text-white/60">
-                                        <span x-text="p.flag + ' · '"></span>
-                                        <span class="text-amber-300 font-mono" x-text="formatHeldCallDuration(p.duration)"></span>
-                                        <span class="text-white/40"> · tap to resume</span>
+                    <!-- Active Call Stack / Held Calls List -->
+                    <div class="shrink-0 space-y-2 max-h-[45%] overflow-y-auto pr-1">
+                        <!-- Loop over all active calls from SDK/state so they stack up neatly -->
+                        <template x-for="callId in Object.keys(ziwoActiveCalls)" :key="callId">
+                            <div x-show="callId !== currentCall.id" 
+                                 class="bg-black/50 border border-white/15 rounded-xl overflow-hidden shadow-md">
+                                <div class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-white/10 transition group"
+                                     @click="switchToHeldCall({ id: callId, number: ziwoActiveCalls[callId]?.phoneNumber || ziwoActiveCalls[callId]?.callerNumber || '', name: ziwoActiveCalls[callId]?.callerIdName || ziwoActiveCalls[callId]?.displayName || '' })">
+                                    
+                                    <!-- Avatar -->
+                                    <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white flex-shrink-0 transition">
+                                        <i class="fa-solid fa-phone text-xs"></i>
                                     </div>
+                                    
+                                    <!-- Info -->
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-[11px] font-bold text-white truncate" 
+                                             x-text="ziwoActiveCalls[callId]?.phoneNumber || ziwoActiveCalls[callId]?.callerNumber || 'Unknown Leg'"></div>
+                                        <div class="text-[9px] text-white/50 flex items-center gap-1">
+                                            <span>On Hold</span>
+                                            <span>·</span>
+                                            <span class="text-emerald-400 font-semibold">tap to resume</span>
+                                        </div>
+                                    </div>
+                                    <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0"></div>
                                 </div>
-                                <!-- Mute/Unmute held participant -->
-                                <button type="button" @click.stop="toggleMuteHeldCall(p)"
-                                        class="w-6 h-6 rounded-full flex items-center justify-center transition flex-shrink-0 bg-white/10 hover:bg-white/20 text-white"
-                                        :title="p.is_muted ? 'Unmute' : 'Mute'">
-                                    <i class="fa-solid text-[9px]" :class="p.is_muted ? 'fa-microphone-slash text-rose-400' : 'fa-microphone'"></i>
-                                </button>
-                                <!-- Disconnect held call button -->
-                                <button type="button" @click.stop="hangupHeldCall(p)"
-                                        class="ml-1 w-6 h-6 rounded-full bg-rose-600/70 hover:bg-rose-500 flex items-center justify-center text-white transition flex-shrink-0"
-                                        title="Disconnect this call">
-                                    <i class="fa-solid fa-phone-slash text-[8px]"></i>
-                                </button>
+                                
+                                <!-- Individual Actions per stacked call leg -->
+                                <div class="flex border-t border-white/10">
+                                    <button type="button" 
+                                            @click.stop="toggleMuteHeldCall({ id: callId })"
+                                            class="flex-1 py-1.5 text-[9px] text-white/60 hover:text-white font-bold transition flex items-center justify-center gap-1">
+                                        <i class="fa-solid fa-microphone"></i> Mute
+                                    </button>
+                                    <div class="w-px bg-white/10"></div>
+                                    <button type="button" 
+                                            @click.stop="switchToHeldCall({ id: callId, number: ziwoActiveCalls[callId]?.phoneNumber || ziwoActiveCalls[callId]?.callerNumber || '', name: ziwoActiveCalls[callId]?.callerIdName || ziwoActiveCalls[callId]?.displayName || '' })"
+                                            class="flex-1 py-1.5 text-[9px] text-emerald-400 hover:text-emerald-300 font-bold transition flex items-center justify-center gap-1">
+                                        <i class="fa-solid fa-phone-flip"></i> Switch
+                                    </button>
+                                    <div class="w-px bg-white/10"></div>
+                                    <button type="button" 
+                                            @click.stop="hangupHeldCall({ id: callId })"
+                                            class="flex-1 py-1.5 text-[9px] text-rose-400 hover:text-rose-300 font-bold transition flex items-center justify-center gap-1">
+                                        <i class="fa-solid fa-phone-slash"></i> End
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Fallback / Static heldParticipants array check if SDK sync is pending -->
+                        <template x-for="(p, idx) in heldParticipants" :key="idx">
+                            <div x-show="!Object.keys(ziwoActiveCalls).includes(p.id) && p.id !== currentCall.id" 
+                                 class="bg-black/50 border border-white/15 rounded-xl overflow-hidden shadow-md">
+                                <div class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-white/10 transition group"
+                                     @click="switchToHeldCall(p)">
+                                    <div class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white flex-shrink-0">
+                                        <i class="fa-solid fa-user text-xs"></i>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-[11px] font-bold text-white truncate" x-text="p.number || p.name"></div>
+                                        <div class="text-[9px] text-white/50">On Hold · tap to resume</div>
+                                    </div>
+                                    <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0"></div>
+                                </div>
+                                <div class="flex border-t border-white/10">
+                                    <button type="button" @click.stop="toggleMuteHeldCall(p)"
+                                            class="flex-1 py-1.5 text-[9px] text-white/60 hover:text-white font-bold transition flex items-center justify-center gap-1">
+                                        <i class="fa-solid" :class="p.is_muted ? 'fa-microphone-slash text-rose-400' : 'fa-microphone'"></i> Mute
+                                    </button>
+                                    <div class="w-px bg-white/10"></div>
+                                    <button type="button" @click.stop="switchToHeldCall(p)"
+                                            class="flex-1 py-1.5 text-[9px] text-emerald-400 hover:text-emerald-300 font-bold transition flex items-center justify-center gap-1">
+                                        Resume
+                                    </button>
+                                    <div class="w-px bg-white/10"></div>
+                                    <button type="button" @click.stop="hangupHeldCall(p)"
+                                            class="flex-1 py-1.5 text-[9px] text-rose-400 hover:text-rose-300 font-bold transition flex items-center justify-center gap-1">
+                                        End
+                                    </button>
+                                </div>
                             </div>
                         </template>
                     </div>
@@ -1021,7 +1071,7 @@ input:focus, textarea:focus, button:focus-visible {
                         
                         <!-- Clear/Reset Button for recovery of stuck screens -->
                         <div class="flex justify-center mt-2">
-                            <button type="button" @click="phoneResetUI()" 
+                            <button type="button" @click.stop="phoneResetUI()" 
                                     style="background: linear-gradient(135deg, #d97706, #b45309) !important; border: 1px solid #f59e0b !important;"
                                     class="text-[10px] text-white hover:opacity-90 font-bold px-3.5 py-1.5 rounded-lg shadow-md transition active:scale-95">
                                 Reset Softphone
@@ -1101,22 +1151,121 @@ input:focus, textarea:focus, button:focus-visible {
                         </div>
                     </div>
 
-                    <!-- Inline Transfer Panel Overlay -->
-                    <div x-show="transferPanelOpen" style="background-color: #0b0f19 !important;" class="absolute inset-0 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
-                        <div class="text-center">
-                            <i class="fa-solid fa-share-nodes text-indigo-500 text-2xl mb-1"></i>
-                            <h5 class="font-bold text-xs text-slate-200">Call Transfer Protocol</h5>
-                            <p class="text-[9px] text-slate-500">Enter target extension or external phone number.</p>
+                    <!-- Transfer Panel (Full Overlay, same style as Add or Call) -->
+                    <div x-show="transferPanelOpen"
+                         x-transition:enter="transition ease-out duration-200"
+                         x-transition:enter-start="opacity-0 translate-y-2"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         class="absolute inset-0 z-50 flex flex-col rounded-2xl overflow-hidden"
+                         style="background: #0f172a;">
+
+                        <!-- Header -->
+                        <div class="flex items-center px-4 pt-4 pb-2 shrink-0 border-b border-slate-700/50">
+                            <i class="fa-solid fa-share-nodes text-indigo-400 mr-3 text-base"></i>
+                            <h5 class="flex-1 font-bold text-sm text-white">Transfer Call</h5>
+                            <button type="button" @click="transferPanelOpen = false"
+                                    class="text-slate-400 hover:text-white transition ml-2">
+                                <i class="fa-solid fa-xmark text-base"></i>
+                            </button>
                         </div>
-                        <div class="space-y-3">
-                            <input type="text" x-model="transferNumber" placeholder="Extension or phone..." 
-                                   class="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-600 outline-none focus:border-indigo-500">
-                            
-                            <div class="grid grid-cols-2 gap-2">
-                                <button type="button" @click="phoneExecuteTransfer('blind')" class="py-2 bg-indigo-600 text-white text-[10px] font-bold rounded-lg hover:bg-indigo-500 transition active:scale-95">Blind Transfer</button>
-                                <button type="button" @click="phoneExecuteTransfer('warm')" class="py-2 bg-indigo-50/10 text-slate-300 text-[10px] font-bold border border-slate-800 rounded-lg hover:bg-slate-900 transition active:scale-95">Attended</button>
+
+                        <!-- Tabs: Teammates / Queues / Manual -->
+                        <div class="flex border-b border-slate-700/50 px-4 shrink-0">
+                            <button type="button" @click="transferTab='manual'"
+                                    :class="transferTab==='manual' ? 'border-b-2 border-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                    class="text-[11px] font-bold px-3 py-2 transition">Manual</button>
+                            <button type="button" @click="transferTab='teammates'"
+                                    :class="transferTab==='teammates' ? 'border-b-2 border-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                    class="text-[11px] font-bold px-3 py-2 transition">Teammates</button>
+                            <button type="button" @click="transferTab='queues'"
+                                    :class="transferTab==='queues' ? 'border-b-2 border-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                    class="text-[11px] font-bold px-3 py-2 transition">Queues</button>
+                        </div>
+
+                        <!-- Search bar -->
+                        <div x-show="transferTab !== 'manual'" class="px-3 pt-3 pb-1 shrink-0">
+                            <div class="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2">
+                                <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs"></i>
+                                <input type="text" x-model="transferSearch" placeholder="Search..."
+                                       class="bg-transparent flex-1 text-xs text-white placeholder-slate-500 outline-none">
                             </div>
-                            <button type="button" @click="transferPanelOpen = false" class="w-full py-1.5 text-slate-500 hover:text-slate-300 text-[10px] font-bold transition">Cancel</button>
+                        </div>
+
+                        <!-- Manual Entry -->
+                        <div x-show="transferTab === 'manual'" class="flex-1 flex flex-col justify-center px-5 gap-4">
+                            <div>
+                                <p class="text-[10px] text-slate-500 mb-2">Enter extension or phone number to transfer to</p>
+                                <input type="text" x-model="transferNumber" placeholder="Extension or phone number..."
+                                       class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 outline-none focus:border-indigo-500 transition">
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <button type="button" @click="phoneExecuteTransfer('blind')"
+                                        class="py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded-xl transition active:scale-95">
+                                    <i class="fa-solid fa-forward mr-1"></i> Blind Transfer
+                                </button>
+                                <button type="button" @click="phoneExecuteTransfer('warm')"
+                                        class="py-2.5 bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold rounded-xl border border-slate-600 transition active:scale-95">
+                                    <i class="fa-solid fa-phone-volume mr-1"></i> Attended
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Teammates list -->
+                        <div x-show="transferTab === 'teammates'" class="flex-1 overflow-y-auto px-2 pb-4 pt-1">
+                            <template x-for="t in mockTeammates.filter(t => !transferSearch || t.name.toLowerCase().includes(transferSearch.toLowerCase()))" :key="t.id">
+                                <div class="flex items-center gap-3 px-3 py-2.5 border-b border-slate-800/50">
+                                    <div class="relative shrink-0">
+                                        <div class="w-9 h-9 rounded-full bg-indigo-700 flex items-center justify-center text-white font-bold text-xs" x-text="t.name.charAt(0)"></div>
+                                        <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-slate-900"
+                                             :class="t.status === 'online' ? 'bg-emerald-400' : t.status === 'busy' ? 'bg-amber-400' : 'bg-slate-500'"></div>
+                                    </div>
+                                    <div class="flex-1 text-left min-w-0">
+                                        <div class="text-xs font-semibold text-slate-200 truncate" x-text="t.name"></div>
+                                        <div class="text-[10px] text-slate-500" x-text="'Ext. ' + t.ext + ' · ' + t.status.charAt(0).toUpperCase() + t.status.slice(1)"></div>
+                                    </div>
+                                    <div class="flex gap-1.5 shrink-0">
+                                        <button type="button" @click="transferNumber = t.number; phoneExecuteTransfer('blind')"
+                                                :disabled="t.status === 'offline'"
+                                                class="px-2 py-1 bg-indigo-600/80 hover:bg-indigo-500 disabled:opacity-40 text-white text-[9px] font-bold rounded-lg transition">
+                                            Blind
+                                        </button>
+                                        <button type="button" @click="transferNumber = t.number; phoneExecuteTransfer('warm')"
+                                                :disabled="t.status === 'offline'"
+                                                class="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-white text-[9px] font-bold rounded-lg border border-slate-600 transition">
+                                            Attended
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                            <template x-if="mockTeammates.filter(t => !transferSearch || t.name.toLowerCase().includes(transferSearch.toLowerCase())).length === 0">
+                                <div class="flex flex-col items-center justify-center py-12 text-center">
+                                    <div class="text-5xl mb-3">👥</div>
+                                    <div class="text-xs font-bold text-slate-300">No teammates found</div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Queues list -->
+                        <div x-show="transferTab === 'queues'" class="flex-1 overflow-y-auto px-2 pb-4 pt-1">
+                            <template x-for="q in mockQueues.filter(q => !transferSearch || q.name.toLowerCase().includes(transferSearch.toLowerCase()))" :key="q.id">
+                                <button type="button" @click="transferNumber = q.number; phoneExecuteTransfer('blind')"
+                                        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800 transition cursor-pointer border-b border-slate-800/50">
+                                    <div class="w-9 h-9 rounded-full bg-fuchsia-800 flex items-center justify-center text-white shrink-0">
+                                        <i class="fa-solid fa-layer-group text-xs"></i>
+                                    </div>
+                                    <div class="flex-1 text-left min-w-0">
+                                        <div class="text-xs font-semibold text-slate-200 truncate" x-text="q.name"></div>
+                                        <div class="text-[10px] text-slate-500" x-text="q.number"></div>
+                                    </div>
+                                    <i class="fa-solid fa-arrow-right text-indigo-400 text-xs shrink-0"></i>
+                                </button>
+                            </template>
+                            <template x-if="mockQueues.filter(q => !transferSearch || q.name.toLowerCase().includes(transferSearch.toLowerCase())).length === 0">
+                                <div class="flex flex-col items-center justify-center py-12 text-center">
+                                    <div class="text-5xl mb-3">📋</div>
+                                    <div class="text-xs font-bold text-slate-300">No queues found</div>
+                                </div>
+                            </template>
                         </div>
                     </div>
 
@@ -1178,18 +1327,18 @@ input:focus, textarea:focus, button:focus-visible {
 
                                 <!-- Tabs -->
                                 <div class="flex border-b border-slate-700/50 px-4 shrink-0">
-                                    <button type="button" @click="addOrCallTab='phonebook'"
-                                            :class="addOrCallTab==='phonebook' ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                    <button type="button" @click="addOrCallTab='phonebook'; addOrCallDialpadOpen=false"
+                                            :class="addOrCallTab==='phonebook' && !addOrCallDialpadOpen ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
                                             class="text-[11px] font-bold px-3 py-2 transition">
                                         PhoneBook
                                     </button>
-                                    <button type="button" @click="addOrCallTab='teammates'"
-                                            :class="addOrCallTab==='teammates' ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                    <button type="button" @click="addOrCallTab='teammates'; addOrCallDialpadOpen=false"
+                                            :class="addOrCallTab==='teammates' && !addOrCallDialpadOpen ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
                                             class="text-[11px] font-bold px-3 py-2 transition">
                                         Teammates
                                     </button>
-                                    <button type="button" @click="addOrCallTab='queues'"
-                                            :class="addOrCallTab==='queues' ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
+                                    <button type="button" @click="addOrCallTab='queues'; addOrCallDialpadOpen=false"
+                                            :class="addOrCallTab==='queues' && !addOrCallDialpadOpen ? 'border-b-2 border-fuchsia-500 text-white' : 'text-slate-400 hover:text-slate-200'"
                                             class="text-[11px] font-bold px-3 py-2 transition">
                                         Queues
                                     </button>
@@ -1343,28 +1492,52 @@ input:focus, textarea:focus, button:focus-visible {
 
                     </div>
 
-                    <!-- Inline Keypad Panel Overlay -->
-                    <div x-show="keypadPanelOpen" style="background-color: #0b0f19 !important;" class="absolute inset-0 p-6 flex flex-col justify-center gap-4 z-50 rounded-2xl">
-                        <div class="text-center">
-                            <i class="fa-solid fa-table-cells text-indigo-500 text-2xl mb-1"></i>
-                            <h5 class="font-bold text-xs text-slate-200">Keypad / DTMF</h5>
-                            <p class="text-[9px] text-slate-500">Send tones during the call.</p>
-                        </div>
-                        
-                        <div class="text-center bg-slate-900 border border-slate-800 rounded-xl py-2 text-white font-mono text-base tracking-widest min-h-[38px]" x-text="dtmfInput || ' '"></div>
+                    <!-- Keypad / DTMF Panel (Full Overlay, same style as Add or Call) -->
+                    <div x-show="keypadPanelOpen"
+                         x-transition:enter="transition ease-out duration-200"
+                         x-transition:enter-start="opacity-0 translate-y-2"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         class="absolute inset-0 z-50 flex flex-col rounded-2xl overflow-hidden"
+                         style="background: #0f172a;">
 
-                        <div class="grid grid-cols-3 gap-2 px-6">
-                            <template x-for="k in ['1','2','3','4','5','6','7','8','9','*','0','#']">
-                                <button type="button" @click="dtmfInput += k; sendDTMF(k)"
-                                        class="h-10 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:text-white transition active:scale-90 flex items-center justify-center font-mono font-bold text-sm text-slate-300 cursor-pointer">
-                                    <span x-text="k"></span>
-                                </button>
-                            </template>
+                        <!-- Header -->
+                        <div class="flex items-center px-4 pt-4 pb-3 shrink-0 border-b border-slate-700/50">
+                            <i class="fa-solid fa-table-cells text-indigo-400 mr-3 text-base"></i>
+                            <h5 class="flex-1 font-bold text-sm text-white">Keypad / DTMF</h5>
+                            <button type="button" @click="keypadPanelOpen = false"
+                                    class="text-slate-400 hover:text-white transition ml-2">
+                                <i class="fa-solid fa-xmark text-base"></i>
+                            </button>
                         </div>
-                        
-                        <div class="flex gap-2 justify-center mt-2">
-                            <button type="button" @click="dtmfInput = ''" class="px-3 py-1 bg-slate-800 text-[10px] text-slate-300 rounded-lg hover:bg-slate-700 font-bold transition">Clear</button>
-                            <button type="button" @click="keypadPanelOpen = false" class="px-3 py-1 bg-indigo-600 text-[10px] text-white rounded-lg hover:bg-indigo-500 font-bold transition">Close</button>
+
+                        <!-- DTMF Display -->
+                        <div class="flex-1 flex flex-col justify-center px-5 gap-4">
+                            <p class="text-[10px] text-slate-500 text-center">Press digits to send tones during the call</p>
+                            <div class="text-center bg-slate-800 border border-slate-700 rounded-xl py-3 px-4 text-white font-mono text-xl tracking-[0.4em] min-h-[52px] flex items-center justify-center">
+                                <span x-text="dtmfInput || '· · ·'" :class="dtmfInput ? 'text-white' : 'text-slate-600'"></span>
+                            </div>
+
+                            <!-- Keypad Grid -->
+                            <div class="grid grid-cols-3 gap-2.5">
+                                <template x-for="k in ['1','2','3','4','5','6','7','8','9','*','0','#']">
+                                    <button type="button" @click="dtmfInput += k; sendDTMF(k)"
+                                            class="h-12 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 hover:border-indigo-500 text-white transition active:scale-90 flex items-center justify-center font-mono font-bold text-base cursor-pointer">
+                                        <span x-text="k"></span>
+                                    </button>
+                                </template>
+                            </div>
+
+                            <!-- Actions -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <button type="button" @click="dtmfInput = ''"
+                                        class="py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-[11px] font-bold rounded-xl border border-slate-600 transition active:scale-95">
+                                    <i class="fa-solid fa-delete-left mr-1"></i> Clear
+                                </button>
+                                <button type="button" @click="keypadPanelOpen = false"
+                                        class="py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold rounded-xl transition active:scale-95">
+                                    <i class="fa-solid fa-check mr-1"></i> Done
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1654,6 +1827,9 @@ function intakeComponent() {
 
         // Keypad Panel Overlay
         keypadPanelOpen: false,
+        _pendingResumeParticipant: null, // holds ref when canceling outbound to resume a held call
+        transferTab: 'manual',       // 'manual' | 'teammates' | 'queues'
+        transferSearch: '',
         dtmfInput: '',
 
         // ─── Add or Call Panel (Conference / Add Participant) ───
@@ -2176,6 +2352,11 @@ function intakeComponent() {
         },
 
         phoneResetUI() {
+            // Debounce — ignore if called within 1 s of last call
+            const now = Date.now();
+            if (this._lastResetAt && (now - this._lastResetAt) < 1000) return;
+            this._lastResetAt = now;
+
             console.log('[Softphone] Manually resetting softphone UI state');
             if (this.currentCall && this.currentCall.id) {
                 fetch('/telephony/hangup', {
@@ -2184,12 +2365,18 @@ function intakeComponent() {
                     body: JSON.stringify({ call_id: this.currentCall.id })
                 }).catch(() => {});
             }
+            // Hang up all known SDK calls
+            Object.values(this.ziwoActiveCalls).forEach(sdkCall => {
+                try { if (typeof sdkCall.hangup === 'function') sdkCall.hangup(); } catch (_) {}
+            });
             this.phoneStatus = 'online';
-            this.phoneTab = 'dialer';
+            this.phoneTab = 'dialer';         // ← always return to Dialer screen
+            this.phoneCollapsed = false;
             this.stopCallTimer();
             this.stopRinging();
             this.ziwoActiveCalls = {};
             this.heldParticipants = [];
+            this._pendingResumeParticipant = null;
             this.currentCall = {
                 id: null,
                 uuid: null,
@@ -2203,6 +2390,7 @@ function intakeComponent() {
             this.transferPanelOpen = false;
             this.addOrCallOpen = false;
             this.keypadPanelOpen = false;
+            this.dialNumberInput = '';
         },
 
         async phoneCheckStatus() {
@@ -2256,6 +2444,7 @@ function intakeComponent() {
                 if (!this.isMockMode) {
                     if (this.phoneAuthenticated && this.phoneStatus === 'offline') {
                         this.phoneStatus = 'online';
+                        this.phoneTab = 'dialer'; // Always land on Dialer tab when going online
                     }
                     return; // SDK events own all call state — poller stays silent
                 }
@@ -2594,9 +2783,58 @@ function intakeComponent() {
             window.addEventListener('ziwo-active', (e) => {
                 const call = extractCall(e);
                 console.log('[ZIWO SDK] ziwo-active:', call);
-                const callId = call?.callId || call?.id || this.currentCall.id;
+                const callId = call?.callId || call?.id;
+
+                // ── GHOST CALL GUARD ──────────────────────────────────────
+                // On SDK reconnect, ziwo-active can fire for stale calls from
+                // the previous session. If callId is not already in ziwoActiveCalls
+                // (registered by ziwo-ringing/ziwo-requesting) AND we have no
+                // current active call, treat this as a ghost and ignore it.
+                // Exception: if currentCall.id exists (we are tracking a call), accept it.
+                const isKnownCall = callId && (this.ziwoActiveCalls[callId] || this.currentCall.id === callId);
+                const isNewInboundCall = callId && this.currentCall.id && !isKnownCall;
+                if (callId && !isKnownCall && !this.currentCall.id && Object.keys(this.ziwoActiveCalls).length === 0) {
+                    // Completely unknown callId on a fresh SDK connect — register but
+                    // do NOT flip the UI to a call screen since no ringing was heard.
+                    console.warn('[ZIWO SDK] ziwo-active for unknown callId on fresh connect — treating as ghost, ignoring UI update.', callId);
+                    if (call) this.ziwoActiveCalls[callId] = call;
+                    return;
+                }
+
                 if (call && callId) this.ziwoActiveCalls[callId] = call;
                 this.stopRinging();
+
+                // ── Restore pending held participant when outbound was cancelled ──
+                // When agent cancels a ringing outbound conference leg by tapping
+                // the held card, the SDK fires ziwo-active for the held call.
+                // Restore that participant's data to currentCall.
+                if (this._pendingResumeParticipant) {
+                    const pending = this._pendingResumeParticipant;
+                    this._pendingResumeParticipant = null;
+                    if (callId === pending.id || Object.keys(this.ziwoActiveCalls).includes(pending.id)) {
+                        this.currentCall = {
+                            id: pending.id,
+                            uuid: pending.id,
+                            caller_number: pending.number,
+                            caller_name: pending.name,
+                            is_held: false,
+                            is_muted: false,
+                            recording_paused: false,
+                            duration: pending.duration || 0,
+                            direction: pending.direction || 'inbound'
+                        };
+                        this.phoneStatus = 'speaking';
+                        this.isConferenceResuming = false;
+                        // Notify backend to resume
+                        fetch('/telephony/resume', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                            body: JSON.stringify({ call_id: pending.id })
+                        }).catch(() => {});
+                        return;
+                    }
+                }
+
                 this.phoneStatus = 'speaking';
                 if (!this.currentCall.id && callId) {
                     this.currentCall.id = callId;
@@ -2680,10 +2918,28 @@ function intakeComponent() {
                     }
                     if (restoredFromHeld) return;
 
-                    // Remaining call not in heldParticipants — just show it as active
+                    // Remaining call not in heldParticipants.
+                    // The SDK may auto-resume it; call unhold() to ensure it resumes,
+                    // then update the UI to show it as the active call.
                     const nextCallId = remainingCallIds[0];
                     const nextCall = this.ziwoActiveCalls[nextCallId];
                     const num = nextCall?.phoneNumber || nextCall?.callerNumber || '';
+                    // Attempt SDK resume for the remaining call
+                    this.isConferenceResuming = true;
+                    if (nextCall && typeof nextCall.unhold === 'function') {
+                        try { nextCall.unhold(); } catch (err) {
+                            console.warn('[ZIWO] Auto-resume on hangup failed:', err);
+                            this.isConferenceResuming = false;
+                        }
+                    } else {
+                        this.isConferenceResuming = false;
+                    }
+                    // Also notify backend
+                    fetch('/telephony/resume', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+                        body: JSON.stringify({ call_id: nextCallId })
+                    }).catch(() => {});
                     this.currentCall = {
                         id: nextCallId,
                         uuid: nextCallId,
@@ -2933,10 +3189,16 @@ function intakeComponent() {
         async phoneHangup() {
             // During conference: hang up the CURRENT active leg (tracked by currentCall.id),
             // not blindly the first entry in ziwoActiveCalls (which may be the held leg).
-            const currentCallId = this.currentCall.id;
-            const call = currentCallId
+            let currentCallId = this.currentCall.id;
+            let call = currentCallId
                 ? (this.ziwoActiveCalls[currentCallId] || Object.values(this.ziwoActiveCalls).find(c => (c.callId || c.id) === currentCallId))
                 : Object.values(this.ziwoActiveCalls)[0];
+            
+            // Fallback for dialing outbound calls when currentCallId matches but isn't stored by ID yet
+            if (!call && this.phoneStatus === 'ringing') {
+                call = Object.values(this.ziwoActiveCalls).find(c => c.direction === 'outbound' || c.phoneNumber === this.currentCall.caller_number);
+            }
+
             console.log('[ZIWO SDK] Hanging up call:', call);
             this.stopRinging();
 
@@ -3038,12 +3300,25 @@ function intakeComponent() {
         async switchToHeldCall(participant) {
             if (!participant || !participant.id) return;
 
-            // If we are currently dialing/ringing a new leg, cancel/hang it up first
+            // ── CASE A: Cancel a ringing outbound conference leg ──────────
+            // When agent is dialing a 2nd leg and taps the held card to cancel,
+            // the ZIWO SDK automatically resumes the held call (fires ziwo-active).
+            // We just need to cancel the outbound leg and let the SDK do the rest.
             if (this.phoneStatus === 'ringing') {
-                console.log('[Softphone] Canceling current dialing/ringing outbound call before switching back.');
+                console.log('[Softphone] Canceling outbound ringing leg — SDK will auto-resume held call.');
+                // Set flag so ziwo-active knows to restore the held participant's data
+                this._pendingResumeParticipant = participant;
+                // Remove from heldParticipants now (the ziwo-active handler will restore currentCall)
+                const idx = this.heldParticipants.findIndex(p => p.id === participant.id);
+                if (idx !== -1) this.heldParticipants.splice(idx, 1);
+                // Cancel outbound leg — ziwo-hangup → ziwo-destroy will fire,
+                // and since heldParticipants is now empty, ziwo-active for the
+                // existing held call will set phoneStatus = 'speaking'
                 await this.phoneHangup();
+                return;
             }
 
+            // ── CASE B: Swap between two connected calls ──────────────────
             // 1. Snapshot current call to place it on hold
             const currentId     = this.currentCall.id;
             const currentNum    = this.currentCall.caller_number;
@@ -3206,6 +3481,8 @@ function intakeComponent() {
         },
 
         openInlineTransfer() {
+            this.transferTab = 'manual';
+            this.transferSearch = '';
             this.transferNumber = '';
             this.transferPanelOpen = true;
         },
