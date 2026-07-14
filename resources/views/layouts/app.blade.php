@@ -748,6 +748,35 @@
                         @endcan
                     @endif
 
+                    {{-- ─── ZIWO ADMIN ─────────────────────────────────── --}}
+                    @if(session('ziwo_admin_token'))
+                        <div class="nav-section">ZIWO</div>
+                        <div class="nav-section-divider"></div>
+
+                        <a href="{{ route('ziwo.dashboard') }}"
+                            class="nav-item {{ request()->routeIs('ziwo.dashboard') ? 'active' : '' }}">
+                            <span class="nav-icon text-violet-500"><i class="fa-solid fa-tower-broadcast"></i></span>
+                            <span class="nav-label">ZIWO Dashboard</span>
+                            <span class="nav-tooltip">Live Monitor</span>
+                        </a>
+
+                        <a href="{{ route('ziwo.statistics') }}"
+                            class="nav-item {{ request()->routeIs('ziwo.statistics') ? 'active' : '' }}">
+                            <span class="nav-icon text-indigo-500"><i class="fa-solid fa-chart-bar"></i></span>
+                            <span class="nav-label">ZIWO Statistics</span>
+                            <span class="nav-tooltip">Reports</span>
+                        </a>
+                    @else
+                        <div class="nav-section">ZIWO</div>
+                        <div class="nav-section-divider"></div>
+                        <a href="{{ route('ziwo.login') }}"
+                            class="nav-item {{ request()->routeIs('ziwo.login') ? 'active' : '' }}">
+                            <span class="nav-icon text-violet-400"><i class="fa-solid fa-tower-broadcast"></i></span>
+                            <span class="nav-label">Connect ZIWO</span>
+                            <span class="nav-tooltip">ZIWO Login</span>
+                        </a>
+                    @endif
+
                 </nav>
 
                 <!-- User Profile Footer -->

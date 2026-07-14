@@ -859,6 +859,19 @@ input:focus, textarea:focus, button:focus-visible {
                     <button type="button" @click="checkOrRequestMicrophone()" class="text-slate-400 p-1 rounded hover:bg-slate-800 transition" :class="micAllowed === true ? 'text-emerald-500 hover:text-emerald-400' : 'text-amber-500 hover:text-rose-500 animate-pulse'" title="Check Microphone Access">
                         <i class="fa-solid" :class="micAllowed === true ? 'fa-microphone' : 'fa-microphone-slash'"></i>
                     </button>
+                    <!-- Quick Tab Switchers (Dialer & Directory) -->
+                    <button type="button" x-show="phoneAuthenticated" @click="phoneTab = 'dialer'"
+                            class="p-1 rounded hover:bg-slate-800 transition text-xs shrink-0"
+                            :class="phoneTab === 'dialer' ? 'text-indigo-400 hover:text-indigo-300' : 'text-slate-400 hover:text-white'"
+                            title="Dialer">
+                        <i class="fa-solid fa-keyboard text-xs"></i>
+                    </button>
+                    <button type="button" x-show="phoneAuthenticated" @click="phoneTab = 'phonebook'; phoneSearchContacts()"
+                            class="p-1 rounded hover:bg-slate-800 transition text-xs shrink-0"
+                            :class="phoneTab === 'phonebook' ? 'text-indigo-400 hover:text-indigo-300' : 'text-slate-400 hover:text-white'"
+                            title="Directory">
+                        <i class="fa-solid fa-address-book text-xs"></i>
+                    </button>
                     <button type="button" @click="phoneDisconnect()" x-show="phoneAuthenticated" class="text-slate-400 hover:text-rose-400 transition" title="Log Out Telephony">
                         <i class="fa-solid fa-power-off text-xs"></i>
                     </button>
@@ -2399,9 +2412,15 @@ function intakeComponent() {
                 if (!res.ok) return;
                 const data = await res.json();
 
+                const wasAuthenticated = this.phoneAuthenticated;
                 this.phoneAuthenticated = data.is_authenticated;
                 this.ziwoUsername = data.ziwo_username || '';
                 this.isMockMode = data.is_mock || false;
+
+                // Expand softphone console if newly authenticated
+                if (!wasAuthenticated && this.phoneAuthenticated) {
+                    this.phoneCollapsed = false;
+                }
 
                 // ── Load real queues/teammates if authenticated and not loaded yet ──
                 if (this.phoneAuthenticated) {
@@ -2545,6 +2564,7 @@ function intakeComponent() {
                 const data = await response.json();
                 if (response.ok && data.status === 'success') {
                     this.phoneAuthenticated = true;
+                    this.phoneCollapsed = false; // Expand console on successful login
                     this.ziwoUsername = data.username || data.ziwo_username || '';
                     this.ziwoToken = data.access_token || data.ziwo_token || null;
                     this.ziwoContactCenter = data.contact_center || 'nayatel';

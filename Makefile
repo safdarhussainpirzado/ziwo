@@ -58,6 +58,16 @@ sync:
 		docker compose cp resources/views/. $$container:/var/www/html/resources/views/; \
 		echo "  -> $$container: config/..."; \
 		docker compose cp config/. $$container:/var/www/html/config/; \
+		echo "  -> $$container: Modules/..."; \
+		docker compose exec $$container mkdir -p /var/www/html/Modules; \
+		docker compose cp Modules/. $$container:/var/www/html/Modules/; \
+		echo "  -> $$container: vendor/..."; \
+		docker compose cp vendor/. $$container:/var/www/html/vendor/; \
+		echo "  -> $$container: composer.json..."; \
+		docker compose cp composer.json $$container:/var/www/html/composer.json; \
+		echo "  -> $$container: bootstrap/..."; \
+		docker compose cp bootstrap/. $$container:/var/www/html/bootstrap/; \
+		docker compose exec --user root $$container chmod -R 777 /var/www/html/bootstrap/cache; \
 		echo "  [OK] $$container synced"; \
 	done
 	@echo "==> All containers synced!"
