@@ -820,7 +820,7 @@ input:focus, textarea:focus, button:focus-visible {
                 title="Toggle Telephony Console">
             <i class="fa-solid" :class="phoneCollapsed ? 'fa-headset' : 'fa-chevron-right'"></i>
             <!-- State indicator badge when collapsed -->
-            <span x-show="phoneCollapsed && ['ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(phoneStatus)"
+            <span x-show="phoneCollapsed && ['ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(phoneStatus) && currentCall.id"
                   class="absolute -top-1 -right-1 flex h-4 w-4">
                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                 <span class="relative inline-flex rounded-full h-4 w-4 bg-rose-500 text-[8px] font-black items-center justify-center text-white">!</span>
@@ -935,7 +935,7 @@ input:focus, textarea:focus, button:focus-visible {
                 </div>
 
                 <!-- 2. Active Incoming / Outgoing Call Overlay -->
-                <div x-show="['ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(phoneStatus)"
+                <div x-show="['ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(phoneStatus) && currentCall.id"
                      class="absolute inset-0 z-40 p-6 flex flex-col justify-between select-none"
                      :style="['ringing_inbound', 'ringing'].includes(phoneStatus) 
                         ? 'background: radial-gradient(circle at top, #60a5fa 0%, #2563eb 100%);' 
@@ -2765,12 +2765,16 @@ function intakeComponent() {
                     // Only update currentCall.id for genuine new outbound calls,
                     // not for SDK-internal resume sequences
                     if (!this.isConferenceResuming) {
-                        this.currentCall.id = call.callId;
-                        this.currentCall.uuid = call.callId;
-                        this.phoneStatus = 'ringing';
+                        // Ghost call guard: only update call state if not idle
+                        // (skip stale events from SDK reconnect)
+                        if (this.phoneStatus !== 'online') {
+                            this.currentCall.id = call.callId;
+                            this.currentCall.uuid = call.callId;
+                            this.phoneStatus = 'ringing';
+                        }
                     }
                 } else {
-                    if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
+                    if (!this.isConferenceResuming && this.phoneStatus !== 'online') this.phoneStatus = 'ringing';
                 }
                 console.log('[ZIWO SDK] ziwo-requesting');
             });
@@ -2779,24 +2783,28 @@ function intakeComponent() {
                 if (call) {
                     this.ziwoActiveCalls[call.callId] = call;
                     if (!this.isConferenceResuming) {
-                        this.currentCall.id = this.currentCall.id || call.callId;
-                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
+                        if (this.phoneStatus !== 'online') {
+                            this.currentCall.id = this.currentCall.id || call.callId;
+                            this.currentCall.uuid = this.currentCall.uuid || call.callId;
+                        }
                     }
                 }
                 console.log('[ZIWO SDK] ziwo-trying');
-                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
+                if (!this.isConferenceResuming && this.phoneStatus !== 'online') this.phoneStatus = 'ringing';
             });
             window.addEventListener('ziwo-early', (e) => {
                 const call = e.detail?.call;
                 if (call) {
                     this.ziwoActiveCalls[call.callId] = call;
                     if (!this.isConferenceResuming) {
-                        this.currentCall.id = this.currentCall.id || call.callId;
-                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
+                        if (this.phoneStatus !== 'online') {
+                            this.currentCall.id = this.currentCall.id || call.callId;
+                            this.currentCall.uuid = this.currentCall.uuid || call.callId;
+                        }
                     }
                 }
                 console.log('[ZIWO SDK] ziwo-early — call is ringing on remote side');
-                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
+                if (!this.isConferenceResuming && this.phoneStatus !== 'online') this.phoneStatus = 'ringing';
             });
 
             // ── ACTIVE: call connected / answered ─────────────────────────
@@ -2818,6 +2826,12 @@ function intakeComponent() {
                     // do NOT flip the UI to a call screen since no ringing was heard.
                     console.warn('[ZIWO SDK] ziwo-active for unknown callId on fresh connect — treating as ghost, ignoring UI update.', callId);
                     if (call) this.ziwoActiveCalls[callId] = call;
+                    return;
+                }
+                // Ghost call guard: if we're idle and this looks like a stale event, skip UI update
+                if (this.phoneStatus === 'online' && !this.currentCall.id) {
+                    console.warn('[ZIWO SDK] ziwo-active while online and no current call — skipping UI update.', callId);
+                    if (call && callId) this.ziwoActiveCalls[callId] = call;
                     return;
                 }
 
