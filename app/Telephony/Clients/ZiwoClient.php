@@ -17,7 +17,7 @@ class ZiwoClient implements TelephonyClientInterface
     {
         $this->baseUrl = rtrim(config('services.ziwo.base_url', 'https://api.ziwo.io/v1'), '/');
         $this->proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
-        $this->isMock = (bool)config('services.ziwo.mock', true);
+        $this->isMock = (bool)config('services.ziwo.mock', false);
     }
 
     /**

@@ -581,6 +581,7 @@
 
                     @can('calls.create')
                         <a href="{{ route('calls.create') }}"
+                            data-no-pjax
                             class="nav-item {{ $cur === 'calls.create' ? 'active' : '' }}">
                             <span class="nav-icon"><i class="fa-solid fa-plus-circle"></i></span>
                             <span class="nav-label">Add Call</span>

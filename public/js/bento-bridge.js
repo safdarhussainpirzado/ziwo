@@ -192,8 +192,6 @@ document.addEventListener('DOMContentLoaded', () => {
             endProgress();
         }
     };
-
-    // Intercept internal links
     document.addEventListener('click', (e) => {
         const link = e.target.closest('a');
         if (!link || e.which > 1 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -201,6 +199,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const isInternal = link.hostname === window.location.hostname;
         const isLogout = link.innerText.toLowerCase().includes('log out') || link.href.includes('logout');
         const isNoPjax = link.hasAttribute('data-no-pjax') || link.getAttribute('target') === '_blank';
+
+        // Force full page reload for guest layout pages (login, etc.)
+        if (isInternal && !isLogout && isGuestPage(link.href)) {
+            e.preventDefault();
+            window.location.href = link.href;
+            return;
+        }
 
         if (isInternal && !isLogout && !isNoPjax) {
             e.preventDefault();
@@ -217,6 +222,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const actionUrl = new URL(form.action, window.location.origin);
         if (actionUrl.hostname !== window.location.hostname) return;
 
+        // Force full page reload for guest layout pages (login, etc.)
+        // IMPORTANT: Do NOT preventDefault — let the native form submission
+        // go through (POST with credentials). SPA navigation would lose POST data.
+        if (isGuestPage(form.action)) {
+            return; // let browser handle form naturally
+        }
+
         e.preventDefault();
 
         const formData = new FormData(form);
@@ -229,9 +241,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    // Detect guest-only pages that must do a full page load to swap layouts
+    const isGuestPage = (url) => {
+        const guestPaths = ['/login', '/forgot-password', '/reset-password', '/2fa'];
+        const path = new URL(url, window.location.origin).pathname;
+        return guestPaths.some(gp => path === gp || path.startsWith(gp + '/'));
+    };
+
     // Handle back/forward
     window.addEventListener('popstate', (e) => {
         if (e.state && e.state.url) {
+            if (isGuestPage(e.state.url)) {
+                window.location.href = e.state.url;
+                return;
+            }
             loadPage(e.state.url, { pushState: false });
         } else {
             loadPage(window.location.href, { pushState: false });
