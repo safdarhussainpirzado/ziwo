@@ -198,19 +198,37 @@ class TelephonyService implements TelephonyServiceInterface
         }
     }
 
-    public function conference(int $userId, string $callId, string $targetNumber): array
+    public function conference(int $userId, string $callId, string $targetNumber, ?string $roomId = null, ?string $action = null): array
     {
         $config = $this->repository->getAgentConfig($userId);
         if (!$config || empty($config->ziwo_token)) {
             return ['status' => 'error', 'message' => 'Agent not authenticated'];
         }
 
+        // Agent leaves the conference room; PBX keeps other parties connected.
+        if ($action === 'leave') {
+            try {
+                $resp = $this->client->leaveConference($config->ziwo_token, $roomId ?? $callId);
+                return ['status' => $resp['status'] ?? 'success', 'message' => 'Left conference'];
+            } catch (Exception $e) {
+                Log::error("TelephonyService LeaveConference Error: {$e->getMessage()}");
+                return ['status' => 'error', 'message' => $e->getMessage()];
+            }
+        }
+
         try {
-            $response = $this->client->conferenceCall($config->ziwo_token, $callId, $targetNumber);
+            // room_id (when provided) is the original conference call id. Reusing
+            // it on every subsequent add keeps the same PBX room alive for true N-way.
+            $response = $this->client->conferenceCall($config->ziwo_token, $callId, $targetNumber, $roomId);
 
             if (($response['status'] ?? '') === 'success') {
                 $call = $this->repository->getCallByZiwoId($callId);
                 if ($call) {
+                    $existingMeta = $call->metadata ?? [];
+                    $participants = $existingMeta['conference_participants'] ?? [];
+                    if (!in_array($targetNumber, $participants, true)) {
+                        $participants[] = $targetNumber;
+                    }
                     $dto = new CallLogDTO(
                         callId: $callId,
                         callUuid: $call->call_uuid,
@@ -218,7 +236,10 @@ class TelephonyService implements TelephonyServiceInterface
                         callerNumber: $call->caller_number,
                         direction: $call->direction,
                         status: 'conference',
-                        metadata: array_merge($call->metadata ?? [], ['conference_participants' => [$targetNumber]])
+                        metadata: array_merge($existingMeta, [
+                            'conference_participants' => $participants,
+                            'conference_room_id'      => $roomId ?? $callId,
+                        ])
                     );
                     $updatedCall = $this->repository->logCall($dto);
                     broadcast(new CallStatusUpdated($updatedCall))->toOthers();
@@ -233,6 +254,7 @@ class TelephonyService implements TelephonyServiceInterface
             return ['status' => 'error', 'message' => $e->getMessage()];
         }
     }
+
 
     public function toggleCallRecording(int $userId, string $callId, bool $pause): array
     {
@@ -272,6 +294,15 @@ class TelephonyService implements TelephonyServiceInterface
             $metadata = [];
             $endTime = null;
             $startTime = null;
+
+            // Preserve any metadata already on this call record (caller_name, is_held, ...)
+            // so we don't wipe it when the same callId hits a new webhook event.
+            if ($callId) {
+                $priorCall = $this->repository->getCallByZiwoId($callId);
+                if ($priorCall && !empty($priorCall->metadata)) {
+                    $metadata = $priorCall->metadata;
+                }
+            }
 
             switch ($eventType) {
                 case 'call.ringing':
@@ -319,6 +350,16 @@ class TelephonyService implements TelephonyServiceInterface
                 case 'call.finished':
                     $status = 'finished';
                     $endTime = now();
+                    // Capture hangup cause / SIP code from the PBX so we can
+                    // diagnose why an outbound call self-disconnects.
+                    $hangupCause    = $payload['cause']           ?? $payload['hangup_cause']    ?? null;
+                    $sipCode        = $payload['sip_code']        ?? $payload['sipCode']         ?? $payload['code']    ?? null;
+                    $sipReason      = $payload['sip_reason']      ?? $payload['sipReason']       ?? $payload['reason']  ?? null;
+                    $disconnectedBy = $payload['disconnected_by'] ?? $payload['disconnectedBy']  ?? null;
+                    if ($hangupCause)    { $metadata['hangup_cause']    = $hangupCause; }
+                    if ($sipCode)        { $metadata['sip_code']        = $sipCode; }
+                    if ($sipReason)      { $metadata['sip_reason']      = $sipReason; }
+                    if ($disconnectedBy) { $metadata['disconnected_by'] = $disconnectedBy; }
                     if ($agentId) {
                         $this->repository->updateAgentStatus($agentId, 'online');
                         $agent = User::find($agentId);

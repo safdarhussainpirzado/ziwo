@@ -268,14 +268,18 @@ class TelephonyController extends Controller
     public function conference(Request $request)
     {
         $request->validate([
-            'call_id' => 'required|string',
-            'target_number' => 'required|string',
+            'call_id'       => 'required_without:action|string',
+            'target_number' => 'required_without:action|string',
+            'room_id'       => 'nullable|string',
+            'action'        => 'nullable|string|in:leave',
         ]);
 
         $result = $this->service->conference(
             auth()->id(),
             $request->input('call_id'),
-            $request->input('target_number')
+            $request->input('target_number'),
+            $request->input('room_id'),
+            $request->input('action')
         );
         return response()->json($result);
     }
@@ -507,5 +511,108 @@ class TelephonyController extends Controller
             return response()->json(['status' => 'error', 'teammates' => [], 'message' => 'Failed to fetch teammates'], 500);
         }
     }
+    /**
+     * Diagnostic endpoint: returns the last N raw webhook payloads.
+     *
+     * Why this exists:
+     *   Outbound calls have been self-disconnecting at ziwo-early without ever
+     *   reaching ziwo-active. The root cause is in the PBX response — SIP code,
+     *   hangup cause, disconnected_by — all of which arrive in the call.hangup
+     *   webhook payload. We log every webhook verbatim in telephony_webhook_logs;
+     *   this endpoint exposes the last N records so the agent can see WHY a
+     *   particular call was dropped.
+     *
+     * Usage:
+     *   GET /telephony/diagnostics/webhooks?limit=20
+     *   GET /telephony/diagnostics/webhooks?limit=20&event=call.hangup
+     */
+    public function diagnosticWebhooks(Request $request)
+    {
+        $limit = (int) $request->input('limit', 20);
+        $limit = max(1, min(200, $limit));
+        $eventFilter = $request->input('event');
+
+        $query = \App\Models\TelephonyWebhookLog::query()
+            ->orderByDesc('created_at')
+            ->limit($limit);
+        if ($eventFilter) {
+            $query->where('event_type', $eventFilter);
+        }
+        $records = $query->get(['id', 'event_type', 'payload', 'processed', 'error_message', 'created_at']);
+
+        return response()->json([
+            'status'  => 'success',
+            'count'   => $records->count(),
+            'records' => $records,
+        ]);
+    }
+
+    /**
+     * Diagnostic endpoint: probes the Aswat/nayatel telephony proxy for the
+     * agent's recent call history. Tries the most common call-logs endpoint
+     * shapes and returns the raw response from each so the agent (or developer)
+     * can see which shape the proxy actually supports.
+     *
+     * Usage:
+     *   GET /telephony/diagnostics/call-history
+     */
+    public function diagnosticCallHistory(Request $request)
+    {
+        $userId = auth()->id();
+        $config = $this->repository->getAgentConfig($userId);
+        if (!$config || empty($config->ziwo_token)) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Agent not authenticated with telephony gateway',
+            ], 401);
+        }
+
+        $proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
+        $token    = $config->ziwo_token;
+
+        $candidates = [
+            ['method' => 'GET', 'path' => '/calls', 'query' => ['agent' => $config->ziwo_username, 'limit' => 20]],
+            ['method' => 'GET', 'path' => '/calls', 'query' => ['limit' => 20]],
+            ['method' => 'GET', 'path' => '/admin/calls', 'query' => ['limit' => 20]],
+            ['method' => 'GET', 'path' => '/admin/agents/' . $config->ziwo_username . '/calls', 'query' => ['limit' => 20]],
+            ['method' => 'GET', 'path' => '/agent/calls', 'query' => ['limit' => 20]],
+            ['method' => 'GET', 'path' => '/calls/history', 'query' => ['limit' => 20]],
+        ];
+
+        $results = [];
+        foreach ($candidates as $c) {
+            $url = $proxyUrl . $c['path'];
+            try {
+                $response = \Illuminate\Support\Facades\Http::withHeaders([
+                    'Accept'       => 'application/json',
+                    'access_token' => $token,
+                ])->timeout(5)->get($url, $c['query']);
+
+                $results[] = [
+                    'method'      => $c['method'],
+                    'path'        => $c['path'],
+                    'query'       => $c['query'],
+                    'http_status' => $response->status(),
+                    'ok'          => $response->successful(),
+                    'body'        => $response->json() ?? $response->body(),
+                ];
+            } catch (\Exception $e) {
+                $results[] = [
+                    'method' => $c['method'],
+                    'path'   => $c['path'],
+                    'query'  => $c['query'],
+                    'ok'     => false,
+                    'error'  => $e->getMessage(),
+                ];
+            }
+        }
+
+        return response()->json([
+            'status'     => 'success',
+            'proxy_url'  => $proxyUrl,
+            'candidates' => $results,
+        ]);
+    }
+
 }
 

@@ -120,7 +120,11 @@ Route::middleware('auth')->group(function () {
         Route::post('/recording', [\App\Http\Controllers\TelephonyController::class, 'toggleRecording'])->name('recording');
         Route::get('/queues', [\App\Http\Controllers\TelephonyController::class, 'getQueues'])->name('queues');
         Route::get('/teammates', [\App\Http\Controllers\TelephonyController::class, 'getTeammates'])->name('teammates');
-        
+
+        // Diagnostic endpoints — view raw webhook payloads and probe PBX call-history
+        Route::get('/diagnostics/webhooks', [\App\Http\Controllers\TelephonyController::class, 'diagnosticWebhooks'])->name('diagnostics.webhooks');
+        Route::get('/diagnostics/call-history', [\App\Http\Controllers\TelephonyController::class, 'diagnosticCallHistory'])->name('diagnostics.callHistory');
+
         // Centralized Phonebook
         Route::get('/phonebook', [\App\Http\Controllers\TelephonyController::class, 'searchPhonebook'])->name('phonebook.search');
         Route::post('/phonebook', [\App\Http\Controllers\TelephonyController::class, 'storePhonebook'])->name('phonebook.store');

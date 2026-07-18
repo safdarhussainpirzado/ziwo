@@ -1,4 +1,5 @@
 import './bootstrap';
+import './softphone/index.js';
 
 import Alpine from 'alpinejs';
 import collapse from '@alpinejs/collapse';

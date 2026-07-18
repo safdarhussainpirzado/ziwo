@@ -1817,6 +1817,106 @@ window.intakeComponent = function () {
         get phoneCallActive() {
             return ['ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(this.phoneStatus);
         },
+
+        // ── STATE MACHINE (focused refactor) ──────────────────────────
+        // Single source of truth for status. All transitions funneled through `send()`.
+        get phoneState() {
+            const s = this.phoneStatus;
+            return {
+                current: s,
+                inCall:       ['ringing_outbound', 'ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(s),
+                ringing:     ['ringing_outbound', 'ringing', 'ringing_inbound'].includes(s),
+                ringingOut:   s === 'ringing_outbound',
+                ringingIn:    s === 'ringing_inbound',
+                active:       s === 'active' || s === 'speaking',
+                speaking:    s === 'active' || s === 'speaking',
+                held:         s === 'held',
+                online:       s === 'online',
+                offline:      s === 'offline',
+                // Action permissions (use instead of scattered phoneStatus checks):
+                canDial:      s === 'online',
+                canAnswer:    s === 'ringing_inbound',
+                canHangup:    ['ringing', 'ringing_outbound', 'ringing_inbound', 'active', 'speaking', 'held'].includes(s),
+                canHold:      (s === 'active' || s === 'speaking') && this.currentCall?.id && !this.currentCall.is_held,
+                canUnhold:    s === 'held',
+                canTransfer:  ['active', 'speaking', 'held'].includes(s),
+                canAddCall:   ['active', 'speaking', 'held'].includes(s),
+            };
+        },
+        sendPhoneEvent(event, payload = {}) {
+            // Centralized event router — single place to update derived fields.
+            switch (event) {
+                case 'AUTH_SUCCESS':
+                    this.phoneStatus = 'online';
+                    this.phoneAuthenticated = true;
+                    this.phoneCollapsed = false;
+                    break;
+                case 'LOGOUT':
+                    this.phoneStatus = 'offline';
+                    this.phoneAuthenticated = false;
+                    this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
+                    this.stopCallTimer();
+                    this.stopRinging();
+                    break;
+                case 'DIAL_INITIATED':
+                    if (this.phoneState.canDial) this.phoneStatus = 'ringing_outbound';
+                    break;
+                case 'INCOMING_RINGING':
+                    if (this.phoneStatus === 'online' || this.phoneStatus === 'held') {
+                        this.phoneStatus = 'ringing_inbound';
+                        if (payload.call) {
+                            this.currentCall = {
+                                id: payload.call.callId || payload.call.id || ('inbound-' + Date.now()),
+                                uuid: payload.call.callId || payload.call.id,
+                                caller_number: payload.num || '',
+                                caller_name: payload.name || '',
+                                is_held: false,
+                                is_muted: false,
+                                recording_paused: false,
+                                duration: 0,
+                                direction: 'inbound'
+                            };
+                        }
+                    }
+                    break;
+                case 'CALL_CONNECTED':
+                    if (payload.call?.id) {
+                        this.currentCall = {
+                            id: payload.call.callId || payload.call.id,
+                            uuid: payload.call.callId || payload.call.id,
+                            caller_number: payload.call.phoneNumber || this.currentCall.caller_number,
+                            caller_name: payload.call.callerIdName || payload.call.displayName || this.currentCall.caller_name,
+                            is_held: false,
+                            is_muted: false,
+                            recording_paused: false,
+                            duration: 0,
+                            direction: this.currentCall.direction || (payload.outbound ? 'outbound' : 'inbound')
+                        };
+                    }
+                    this.phoneStatus = 'active';
+                    this.startCallTimer();
+                    this.stopRinging();
+                    break;
+                case 'CALL_HELD':
+                    this.phoneStatus = 'held';
+                    this.currentCall.is_held = true;
+                    break;
+                case 'CALL_UNHELD':
+                    this.phoneStatus = 'active';
+                    this.currentCall.is_held = false;
+                    break;
+                case 'CALL_HANGUP':
+                    this.phoneStatus = 'online';
+                    this.stopCallTimer();
+                    this.stopRinging();
+                    this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
+                    break;
+                case 'CALL_DESTROYED':
+                    this.stopCallTimer();
+                    this.stopRinging();
+                    break;
+            }
+        },
         phoneStatusError: '',
         showPhonePassword: false,
         isMockMode: false,
@@ -2959,10 +3059,37 @@ window.intakeComponent = function () {
             // ── HANGUP: call ended ────────────────────────────────────────
             window.addEventListener('ziwo-hangup', (e) => {
                 const call = extractCall(e);
-                console.log('[ZIWO SDK] ziwo-hangup:', call);
+                // Capture full event detail so we can see WHY the PBX hung up
+                // (cause, sipCode, sipReason). Useful when an outbound call drops
+                // at ziwo-early without ever reaching ziwo-active.
+                // The SDK event detail contains a circular ref (call.verto.orchestrator.verto → ...),
+                // so we walk it manually and stop at known circular nodes.
+                const safeDetail = (() => {
+                    try {
+                        const seen = new WeakSet();
+                        return JSON.stringify(e.detail, (k, v) => {
+                            if (typeof v === 'function') return '[fn]';
+                            if (v && typeof v === 'object') {
+                                if (seen.has(v)) return '[circular]';
+                                seen.add(v);
+                                if (k === 'verto' || k === 'orchestrator' || k === 'channel' || k === 'rtcPeerConnection') return '[' + (v?.constructor?.name || 'object') + ']';
+                            }
+                            return v;
+                        });
+                    } catch (err) {
+                        return '<unserializable: ' + err.message + '>';
+                    }
+                })();
+                console.log('[ZIWO SDK] ziwo-hangup detail:', safeDetail);
+                const cause = e.detail?.cause || e.detail?.reason || e.detail?.call?.cause || call?.cause;
+                const sipCode = e.detail?.sipCode || e.detail?.code || e.detail?.call?.sipCode || call?.sipCode;
+                const sipReason = e.detail?.sipReason || e.detail?.reasonPhrase || e.detail?.call?.sipReason || call?.sipReason;
+                if (cause || sipCode) {
+                    console.warn(`[ZIWO SDK] hangup cause=${cause} sipCode=${sipCode} sipReason=${sipReason}`);
+                }
                 const callId = call?.callId || call?.id;
                 if (callId) delete this.ziwoActiveCalls[callId];
-                
+
                 this.stopRinging();
                 this.playEndCallTone();
                 this.phoneLoadRecentLogs();
@@ -3229,6 +3356,28 @@ window.intakeComponent = function () {
                 console.warn('[ZIWO SDK] phoneDial ignored — already in call, status=' + this.phoneStatus);
                 return;
             }
+
+            // ── GUARD: SDK must be ready AND PBX must have accepted login ──
+            // The SDK's connect() resolves when the WebSocket opens, but the
+            // Verto login happens *after* (line 1281 of umd.js). If PBX sends
+            // error -32003 (silently swallowed at line 1477), position stays
+            // undefined and every startCall ships login=undefined@undefined,
+            // which PBX replies with Bye after 180 Ringing → symptom =
+            // ziwo-requesting → trying → early → hangup → destroy in <1s.
+            const verto = this.ziwoSdkClient?.verto;
+            const position = verto?.position;
+            const socketOpen = verto?.socket?.readyState === 1; // OPEN
+            if (!socketOpen) {
+                console.error('[ZIWO SDK] phoneDial: WebSocket not open (readyState=' + verto?.socket?.readyState + '). SDK not ready.');
+                if (window.Notification) window.Notification.warning('Telephony not connected. Wait a moment and try again.', 'Call Failed');
+                return;
+            }
+            if (!position || !position.name || !position.hostname || position.name.includes('undefined')) {
+                console.error('[ZIWO SDK] phoneDial: position not set yet. PBX login may have failed silently (-32003). position=', position, 'connectedAgent=', this.ziwoSdkClient?.connectedAgent);
+                if (window.Notification) window.Notification.error('PBX login pending. Please refresh the page in a few seconds.', 'Call Failed');
+                return;
+            }
+            console.log('[ZIWO SDK] phoneDial: position OK =', position.name + '@' + position.hostname);
 
             // Stuck-call watchdog: if ziwo-active/trying/early never arrives within 60s,
             // reset UI so the user can dial again. Clear any prior watchdog.

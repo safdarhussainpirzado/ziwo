@@ -51,7 +51,7 @@ interface TelephonyServiceInterface
     /**
      * Merge call or initiate a conference call.
      */
-    public function conference(int $userId, string $callId, string $targetNumber): array;
+    public function conference(int $userId, string $callId, string $targetNumber, ?string $roomId = null, ?string $action = null): array;
 
     /**
      * Pause or resume active call recording.

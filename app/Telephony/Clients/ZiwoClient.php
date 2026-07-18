@@ -158,11 +158,19 @@ class ZiwoClient implements TelephonyClientInterface
         ], $agentToken);
     }
 
-    public function conferenceCall(string $agentToken, string $callId, string $targetNumber): array
+    public function conferenceCall(string $agentToken, string $callId, string $targetNumber, ?string $roomId = null): array
     {
         return $this->request('POST', "calls/conference", [
             'call_id' => $callId,
-            'target' => $targetNumber,
+            'room_id' => $roomId ?? $callId, // reuse same room across N-way adds
+            'target'  => $targetNumber,
+        ], $agentToken);
+    }
+
+    public function leaveConference(string $agentToken, string $roomId): array
+    {
+        return $this->request('POST', "calls/conference/leave", [
+            'room_id' => $roomId,
         ], $agentToken);
     }
 
