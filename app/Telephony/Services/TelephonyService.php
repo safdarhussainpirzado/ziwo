@@ -430,6 +430,98 @@ class TelephonyService implements TelephonyServiceInterface
         return $stats;
     }
 
+    // ── Admin / Dashboard API methods ──
+
+    public function adminGetAgents(): array
+    {
+        $config = $this->repository->getFirstAdminConfig();
+        if (!$config || empty($config->ziwo_token)) {
+            return ['status' => 'error', 'message' => 'No admin token configured'];
+        }
+        return $this->client->getAgentsList($config->ziwo_token);
+    }
+
+    public function adminGetAgentDetail(string $username): array
+    {
+        $config = $this->repository->getFirstAdminConfig();
+        if (!$config || empty($config->ziwo_token)) {
+            return ['status' => 'error', 'message' => 'No admin token configured'];
+        }
+        return $this->client->getAgentDetail($config->ziwo_token, $username);
+    }
+
+    public function adminGetCallHistory(array $filters = []): array
+    {
+        $config = $this->repository->getFirstAdminConfig();
+        if (!$config || empty($config->ziwo_token)) {
+            return ['status' => 'error', 'message' => 'No admin token configured'];
+        }
+        return $this->client->getCallHistory($config->ziwo_token, $filters);
+    }
+
+    public function adminGetWallboardLive(): array
+    {
+        $config = $this->repository->getFirstAdminConfig();
+        if (!$config || empty($config->ziwo_token)) {
+            return ['status' => 'error', 'message' => 'No admin token configured'];
+        }
+        return $this->client->getWallboardLive($config->ziwo_token);
+    }
+
+    public function adminGetQueues(): array
+    {
+        $config = $this->repository->getFirstAdminConfig();
+        if (!$config || empty($config->ziwo_token)) {
+            return ['status' => 'error', 'message' => 'No admin token configured'];
+        }
+        return $this->client->getQueues($config->ziwo_token);
+    }
+
+    public function adminGetCallRecording(string $callId): array
+    {
+        $config = $this->repository->getFirstAdminConfig();
+        if (!$config || empty($config->ziwo_token)) {
+            return ['status' => 'error', 'message' => 'No admin token configured'];
+        }
+        return $this->client->getCallRecording($config->ziwo_token, $callId);
+    }
+
+    public function setAgentStatus(int $userId, string $username, string $ziwoToken, string $status): array
+    {
+        $allowed = ['available', 'meeting', 'break', 'outgoing'];
+        if (!in_array($status, $allowed, true)) {
+            return ['status' => 'error', 'message' => "Invalid status '{$status}'"];
+        }
+
+        // Optimistically persist locally so the header reflects the
+        // requested state immediately. The proxy call below either confirms
+        // it or reverts.
+        session(["phone_agent_status_{$userId}" => $status]);
+        $this->repository->updateAgentStatus($userId, $status);
+
+        $result = $this->client->setAgentStatus($ziwoToken, $username, $status);
+
+        if (($result['result'] ?? null) === true || ($result['status'] ?? '') === 'success') {
+            return [
+                'status'       => 'success',
+                'agent_status' => $status,
+                'username'     => $username,
+            ];
+        }
+
+        // Proxy rejected — revert local state to current DB value.
+        $current = $this->repository->getAgentConfig($userId);
+        $revert = $current->agent_status ?? 'offline';
+        $this->repository->updateAgentStatus($userId, $revert);
+        session(["phone_agent_status_{$userId}" => $revert]);
+
+        return [
+            'status'       => 'error',
+            'message'      => $result['message'] ?? 'ZIWO proxy rejected status change',
+            'agent_status' => $revert,
+        ];
+    }
+
     /**
      * Internal helper to wrap common call actions (hold, resume, mute, etc.).
      */

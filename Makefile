@@ -61,8 +61,6 @@ sync:
 		echo "  -> $$container: Modules/..."; \
 		docker compose exec $$container mkdir -p /var/www/html/Modules; \
 		docker compose cp Modules/. $$container:/var/www/html/Modules/; \
-		echo "  -> $$container: vendor/..."; \
-		docker compose cp vendor/. $$container:/var/www/html/vendor/; \
 		echo "  -> $$container: composer.json..."; \
 		docker compose cp composer.json $$container:/var/www/html/composer.json; \
 		echo "  -> $$container: bootstrap/..."; \

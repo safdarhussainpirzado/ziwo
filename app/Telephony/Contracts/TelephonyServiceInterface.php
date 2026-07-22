@@ -67,4 +67,43 @@ interface TelephonyServiceInterface
      * Get live and historical metrics for the admin dashboard.
      */
     public function getDashboardAnalytics(): array;
+
+    // ── Admin / Dashboard service methods (proxy to Aswat API) ──
+
+    /**
+     * Get agents list with statuses.
+     */
+    public function adminGetAgents(): array;
+
+    /**
+     * Get agent detail with KPIs.
+     */
+    public function adminGetAgentDetail(string $username): array;
+
+    /**
+     * Get call history with filters.
+     */
+    public function adminGetCallHistory(array $filters = []): array;
+
+    /**
+     * Get wallboard live stats.
+     */
+    public function adminGetWallboardLive(): array;
+
+    /**
+     * Get queue stats.
+     */
+    public function adminGetQueues(): array;
+
+    /**
+     * Get call recording metadata.
+     */
+    public function adminGetCallRecording(string $callId): array;
+
+    /**
+     * Persist the agent's requested presence locally and forward to the
+     * ZIWO proxy (PUT /agents/status with {number, comment}). On proxy
+     * rejection, revert the local state to the current DB value.
+     */
+    public function setAgentStatus(int $userId, string $username, string $ziwoToken, string $status): array;
 }

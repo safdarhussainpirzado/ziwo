@@ -4,7 +4,7 @@ import laravel from 'laravel-vite-plugin';
 export default defineConfig({
     build: {
         // Build to a fresh user-owned temp directory to avoid root-owned public/build
-        outDir: 'public/build_new',
+        outDir: 'public/build',
         emptyOutDir: true,
     },
     plugins: [

@@ -1,5 +1,5 @@
-// Hand-rolled softphone state machine. ~80 lines, no deps.
-// Single source of truth for call/connection state. UI subscribes via Alpine.
+// Hand-rolled softphone state machine. Single source of truth for call state.
+// UI subscribes via Alpine. No deps.
 //
 // States (dot-paths):
 //   idle, ready, incoming, dialing, connecting,
@@ -7,8 +7,8 @@
 //   transfer.consulting, transfer.consultActive,
 //   conference.active, conference.activeWithHeld
 //
-// Events are plain { type, ...payload } objects. send() applies the matching
-// transition; if no transition matches, the event is dropped (and warned).
+// INCOMING calls MUST use adapter.reject() not adapter.hangup() — ZIWO SDK
+// hangup() on a still-ringing call is a no-op and the call keeps ringing.
 
 export const STATES = {
   IDLE: 'idle',
@@ -43,11 +43,13 @@ export const EVENTS = {
   COMPLETE_TRANSFER: 'COMPLETE_TRANSFER',
   CANCEL_TRANSFER: 'CANCEL_TRANSFER',
   ADD_PARTICIPANT: 'ADD_PARTICIPANT',
-  PARTICIPANT_JOINED: 'PARTIPANT_JOINED',
+  PARTICIPANT_JOINED: 'PARTICIPANT_JOINED',
   PARTICIPANT_LEFT: 'PARTICIPANT_LEFT',
   HOLD_PARTICIPANT: 'HOLD_PARTICIPANT',
   RESUME_PARTICIPANT: 'RESUME_PARTICIPANT',
   REMOVE_PARTICIPANT: 'REMOVE_PARTICIPANT',
+  MUTE_PARTICIPANT: 'MUTE_PARTICIPANT',
+  UNMUTE_PARTICIPANT: 'UNMUTE_PARTICIPANT',
   LEAVE_CONFERENCE: 'LEAVE_CONFERENCE',
   HANGUP_ALL: 'HANGUP_ALL',
   SDK_EVENT: 'SDK_EVENT',
@@ -57,9 +59,9 @@ export const EVENTS = {
 const initialContext = () => ({
   auth: null,
   activeCallId: null,
-  conferenceRoomId: null,          // first call id of the conference; reused for every ADD_PARTICIPANT
-  calls: {},                       // callId -> { id, number, name, direction, isHeld, isMuted, startedAt }
-  participants: [],                // conference only: [{ id, number, name, isHeld, isMuted, joinedAt }]
+  conferenceRoomId: null,
+  calls: {},
+  participants: [],
   transfer: { consultCallId: null, originalCallId: null },
   error: null,
 });
@@ -68,17 +70,14 @@ export function createMachine() {
   let state = STATES.IDLE;
   let ctx = initialContext();
   const listeners = new Set();
-  const effects = []; // queued to fire after state mutation
+  const effects = [];
 
-  const matches = (id) =>
-    state === id || state.startsWith(id + '.');
-
+  const matches = (id) => state === id || state.startsWith(id + '.');
   const isInCall = () => matches('inCall');
   const isConference = () => matches('conference');
   const hasHeldParticipant = () => ctx.participants.some((p) => p.isHeld);
 
   const onConferenceEnter = () => {
-    // promote the current call to the participants list if not already there
     const id = ctx.activeCallId;
     if (!id) return;
     const call = ctx.calls[id];
@@ -104,20 +103,22 @@ export function createMachine() {
     queueMicrotask(() => queued.forEach((fn) => fn()));
   };
 
+  const resetCallRefs = () => {
+    ctx.activeCallId = null;
+    ctx.transfer = { consultCallId: null, originalCallId: null };
+  };
+
   const transition = (event) => {
     const t = event.type;
-    const resetCallRefs = () => {
-      ctx.activeCallId = null;
-      ctx.transfer = { consultCallId: null, originalCallId: null };
-    };
 
     switch (state) {
-      case STATES.IDLE:
+      case STATES.IDLE: {
         if (t === EVENTS.AUTH_OK) return set(STATES.READY, () => { ctx.auth = event.auth || true; });
-        if (t === EVENTS.ERROR)  return set(STATES.IDLE, () => { ctx.error = event.msg; });
+        if (t === EVENTS.ERROR) return set(STATES.IDLE, () => { ctx.error = event.msg; });
         break;
+      }
 
-      case STATES.READY:
+      case STATES.READY: {
         if (t === EVENTS.INCOMING) {
           return set(STATES.INCOMING, () => {
             const callId = event.callId || ('in_' + Date.now());
@@ -139,15 +140,10 @@ export function createMachine() {
             effects.push(() => ctx._adapter?.dial?.(event.number));
           });
         }
-        if (t === EVENTS.SDK_EVENT) {
-          // SDK may deliver an inbound when the page is in ready
-          if (event.payload?.kind === 'inbound') {
-            return transition({ type: EVENTS.INCOMING, ...event.payload });
-          }
-        }
         break;
+      }
 
-      case STATES.INCOMING:
+      case STATES.INCOMING: {
         if (t === EVENTS.ANSWER) {
           return set(STATES.IN_CALL_ACTIVE, () => {
             effects.push(() => ctx._adapter?.answer?.(ctx.activeCallId));
@@ -156,26 +152,28 @@ export function createMachine() {
         if (t === EVENTS.REJECT || t === EVENTS.REMOTE_HANGUP) {
           return set(STATES.READY, () => {
             const id = ctx.activeCallId;
+            if (t === EVENTS.REJECT) effects.push(() => ctx._adapter?.reject?.(id));
             delete ctx.calls[id];
             resetCallRefs();
           });
         }
         break;
+      }
 
-      case STATES.DIALING:
-        if (t === EVENTS.REMOTE_ANSWERED) {
-          return set(STATES.IN_CALL_ACTIVE);
-        }
-        if (t === EVENTS.REMOTE_HANGUP) {
+      case STATES.DIALING: {
+        if (t === EVENTS.REMOTE_ANSWERED) return set(STATES.IN_CALL_ACTIVE);
+        if (t === EVENTS.REMOTE_HANGUP || t === EVENTS.REJECT || t === EVENTS.CANCEL_TRANSFER) {
           return set(STATES.READY, () => {
             const id = ctx.activeCallId;
+            effects.push(() => ctx._adapter?.hangup?.(id));
             delete ctx.calls[id];
             resetCallRefs();
           });
         }
         break;
+      }
 
-      case STATES.IN_CALL_ACTIVE:
+      case STATES.IN_CALL_ACTIVE: {
         if (t === EVENTS.HOLD) {
           return set(STATES.IN_CALL_HELD, () => {
             if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isHeld = true;
@@ -198,7 +196,6 @@ export function createMachine() {
               direction: 'outbound', isHeld: false, isMuted: false, startedAt: Date.now(),
             };
             ctx.transfer = { consultCallId, originalCallId };
-            // original caller goes on hold
             if (ctx.calls[originalCallId]) ctx.calls[originalCallId].isHeld = true;
             effects.push(() => ctx._adapter?.attendedStart?.(originalCallId, event.number));
           });
@@ -206,11 +203,8 @@ export function createMachine() {
         if (t === EVENTS.ADD_PARTICIPANT) {
           return set(STATES.CONFERENCE_ACTIVE, () => {
             onConferenceEnter();
-            // lock the room id the first time we enter conference; every subsequent
-            // ADD_PARTICIPANT reuses it so the PBX keeps the same room alive.
             if (!ctx.conferenceRoomId) ctx.conferenceRoomId = ctx.activeCallId;
-            const roomId = ctx.conferenceRoomId;
-            effects.push(() => ctx._adapter?.addParticipant?.(event.number, roomId));
+            effects.push(() => ctx._adapter?.addParticipant?.(event.number, ctx.conferenceRoomId));
           });
         }
         if (t === EVENTS.HANGUP_ALL) {
@@ -222,8 +216,9 @@ export function createMachine() {
           });
         }
         break;
+      }
 
-      case STATES.IN_CALL_HELD:
+      case STATES.IN_CALL_HELD: {
         if (t === EVENTS.UNHOLD) {
           return set(STATES.IN_CALL_ACTIVE, () => {
             if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isHeld = false;
@@ -233,7 +228,8 @@ export function createMachine() {
         if (t === EVENTS.ADD_PARTICIPANT) {
           return set(STATES.CONFERENCE_ACTIVE, () => {
             onConferenceEnter();
-            effects.push(() => ctx._adapter?.addParticipant?.(event.number));
+            if (!ctx.conferenceRoomId) ctx.conferenceRoomId = ctx.activeCallId;
+            effects.push(() => ctx._adapter?.addParticipant?.(event.number, ctx.conferenceRoomId));
           });
         }
         if (t === EVENTS.HANGUP_ALL) {
@@ -245,22 +241,24 @@ export function createMachine() {
           });
         }
         break;
+      }
 
-      case STATES.TRANSFER_CONSULTING:
+      case STATES.TRANSFER_CONSULTING: {
         if (t === EVENTS.CONSULT_ANSWERED) return set(STATES.TRANSFER_CONSULT_ACTIVE);
         if (t === EVENTS.CONSULT_FAILED || t === EVENTS.CANCEL_TRANSFER) {
           return set(STATES.IN_CALL_ACTIVE, () => {
             const { originalCallId, consultCallId } = ctx.transfer;
+            effects.push(() => ctx._adapter?.attendedCancel?.());
             delete ctx.calls[consultCallId];
             if (ctx.calls[originalCallId]) ctx.calls[originalCallId].isHeld = false;
             ctx.activeCallId = originalCallId;
             ctx.transfer = { consultCallId: null, originalCallId: null };
-            effects.push(() => ctx._adapter?.unhold?.(originalCallId));
           });
         }
         break;
+      }
 
-      case STATES.TRANSFER_CONSULT_ACTIVE:
+      case STATES.TRANSFER_CONSULT_ACTIVE: {
         if (t === EVENTS.COMPLETE_TRANSFER) {
           return set(STATES.READY, () => {
             effects.push(() => ctx._adapter?.attendedComplete?.());
@@ -279,9 +277,10 @@ export function createMachine() {
           });
         }
         break;
+      }
 
       case STATES.CONFERENCE_ACTIVE:
-      case STATES.CONFERENCE_HELD:
+      case STATES.CONFERENCE_HELD: {
         if (t === EVENTS.PARTICIPANT_JOINED) {
           return set(hasHeldParticipant() ? STATES.CONFERENCE_HELD : STATES.CONFERENCE_ACTIVE, () => {
             if (!ctx.participants.find((p) => p.id === event.participant.id)) {
@@ -290,61 +289,65 @@ export function createMachine() {
           });
         }
         if (t === EVENTS.PARTICIPANT_LEFT || t === EVENTS.REMOVE_PARTICIPANT) {
-          return set(hasHeldParticipant() ? STATES.CONFERENCE_HELD : STATES.CONFERENCE_ACTIVE, () => {
-            const id = event.participantId || event.participant?.id;
-            ctx.participants = ctx.participants.filter((p) => p.id !== id);
-            effects.push(() => ctx._adapter?.removeParticipant?.(id));
-            if (ctx.participants.length === 0) {
-              // last participant gone → back to ready
-              state = STATES.READY;
+          const id = event.participantId || event.participant?.id;
+          ctx.participants = ctx.participants.filter((p) => p.id !== id);
+          effects.push(() => ctx._adapter?.removeParticipant?.(id));
+          if (ctx.participants.length === 0) {
+            return set(STATES.READY, () => {
               ctx.calls = {};
+              ctx.conferenceRoomId = null;
               resetCallRefs();
-            }
-          });
+            });
+          }
+          return set(hasHeldParticipant() ? STATES.CONFERENCE_HELD : STATES.CONFERENCE_ACTIVE);
         }
         if (t === EVENTS.HOLD_PARTICIPANT) {
-          return set(STATES.CONFERENCE_HELD, () => {
-            const p = ctx.participants.find((x) => x.id === event.participantId);
-            if (p) p.isHeld = true;
-            effects.push(() => ctx._adapter?.hold?.(event.participantId));
-          });
+          const p = ctx.participants.find((x) => x.id === event.participantId);
+          if (p) p.isHeld = true;
+          effects.push(() => ctx._adapter?.hold?.(event.participantId));
+          return set(STATES.CONFERENCE_HELD);
         }
         if (t === EVENTS.RESUME_PARTICIPANT) {
-          return set(STATES.CONFERENCE_ACTIVE, () => {
-            const p = ctx.participants.find((x) => x.id === event.participantId);
-            if (p) p.isHeld = false;
-            effects.push(() => ctx._adapter?.unhold?.(event.participantId));
-          });
+          const p = ctx.participants.find((x) => x.id === event.participantId);
+          if (p) p.isHeld = false;
+          effects.push(() => ctx._adapter?.unhold?.(event.participantId));
+          return set(hasHeldParticipant() ? STATES.CONFERENCE_HELD : STATES.CONFERENCE_ACTIVE);
+        }
+        if (t === EVENTS.MUTE_PARTICIPANT) {
+          const p = ctx.participants.find((x) => x.id === event.participantId);
+          if (p) p.isMuted = true;
+          effects.push(() => ctx._adapter?.mute?.(event.participantId));
+          return set(state);
+        }
+        if (t === EVENTS.UNMUTE_PARTICIPANT) {
+          const p = ctx.participants.find((x) => x.id === event.participantId);
+          if (p) p.isMuted = false;
+          effects.push(() => ctx._adapter?.unmute?.(event.participantId));
+          return set(state);
         }
         if (t === EVENTS.ADD_PARTICIPANT) {
-          return set(hasHeldParticipant() ? STATES.CONFERENCE_HELD : STATES.CONFERENCE_ACTIVE, () => {
-            if (!ctx.conferenceRoomId) ctx.conferenceRoomId = ctx.activeCallId;
-            const roomId = ctx.conferenceRoomId;
-            effects.push(() => ctx._adapter?.addParticipant?.(event.number, roomId));
-          });
+          if (!ctx.conferenceRoomId) ctx.conferenceRoomId = ctx.activeCallId;
+          effects.push(() => ctx._adapter?.addParticipant?.(event.number, ctx.conferenceRoomId));
+          return set(state);
         }
         if (t === EVENTS.LEAVE_CONFERENCE) {
-          return set(STATES.READY, () => {
-            effects.push(() => ctx._adapter?.leaveConference?.());
-            ctx.participants = [];
-            ctx.calls = {};
-            ctx.conferenceRoomId = null;
-            resetCallRefs();
-          });
+          effects.push(() => ctx._adapter?.leaveConference?.());
+          ctx.participants = [];
+          ctx.calls = {};
+          ctx.conferenceRoomId = null;
+          return set(STATES.READY, () => resetCallRefs());
         }
         if (t === EVENTS.HANGUP_ALL) {
-          return set(STATES.READY, () => {
-            ctx.participants.forEach((p) => effects.push(() => ctx._adapter?.hangup?.(p.id)));
-            ctx.participants = [];
-            ctx.calls = {};
-            ctx.conferenceRoomId = null;
-            resetCallRefs();
-          });
+          ctx.participants.forEach((p) => effects.push(() => ctx._adapter?.hangup?.(p.id)));
+          ctx.participants = [];
+          ctx.calls = {};
+          ctx.conferenceRoomId = null;
+          return set(STATES.READY, () => resetCallRefs());
         }
         break;
+      }
     }
 
-    // unmapped: warn once per type per state to surface wiring mistakes
     if (typeof console !== 'undefined' && console.debug) {
       console.debug('[softphone] dropped event', t, 'in state', state);
     }

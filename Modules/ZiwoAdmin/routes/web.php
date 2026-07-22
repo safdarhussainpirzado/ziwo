@@ -8,8 +8,6 @@ Route::prefix('ziwo')->name('ziwo.')->group(function () {
     Route::post('/login', [ZiwoAdminController::class, 'login'])->name('login.post');
 
     Route::middleware(['auth'])->group(function () {
-        Route::get('/dashboard', [ZiwoAdminController::class, 'dashboard'])->name('dashboard');
-        Route::get('/statistics', [ZiwoAdminController::class, 'statistics'])->name('statistics');
         Route::get('/export/{format}', [ZiwoAdminController::class, 'export'])->name('export');
     });
 });

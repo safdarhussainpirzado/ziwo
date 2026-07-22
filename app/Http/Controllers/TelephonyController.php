@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Telephony\Contracts\TelephonyClientInterface;
 use App\Telephony\Contracts\TelephonyServiceInterface;
 use App\Telephony\Contracts\TelephonyRepositoryInterface;
 use App\Telephony\DTOs\ContactDTO;
@@ -14,7 +15,8 @@ class TelephonyController extends Controller
 {
     public function __construct(
         protected TelephonyServiceInterface $service,
-        protected TelephonyRepositoryInterface $repository
+        protected TelephonyRepositoryInterface $repository,
+        protected TelephonyClientInterface $client
     ) {}
 
     /**
@@ -40,7 +42,6 @@ class TelephonyController extends Controller
         // Attach contact_center name for frontend SDK initialization
         if (($result['status'] ?? '') === 'success') {
             $result['contact_center'] = config('services.ziwo.contact_center', 'nayatel');
-            $result['is_mock'] = (bool)config('services.ziwo.mock', false);
             return response()->json($result);
         }
 
@@ -122,7 +123,6 @@ class TelephonyController extends Controller
             'is_authenticated' => true,
             'expires_at'       => $config->expires_at?->toIso8601String(),
             'active_call'      => $activeCallData,
-            'is_mock'          => (bool)config('services.ziwo.mock', false),
         ]);
 
     }
@@ -134,6 +134,211 @@ class TelephonyController extends Controller
     {
         $calls = $this->repository->getRecentCalls(auth()->id());
         return response()->json($calls);
+    }
+
+    /**
+     * GET /telephony/calls/live — fetch the agent's live call history directly
+     * from the ZIWO proxy.
+     *
+     * Live path (probed against nayatel-api.aswat.co):
+     *   GET /agents/channels/calls?limit=50&skip=0&dataset=tags&dataset=notes&dataset=customer
+     *
+     * Each record has: callID, callerIDNumber, direction, disposition, duration,
+     * result, startedAt, endedAt, queueName, position, customer, recordingFile,
+     * and a tags/notes/customer sub-object when those datasets are requested.
+     *
+     * The proxy requires no admin token; the agent's own access_token works
+     * because ZIWO scopes the call list to calls that touched that agent.
+     */
+    public function liveCallHistory(Request $request)
+    {
+        $userId = auth()->id();
+        $config = $this->repository->getAgentConfig($userId);
+        if (!$config || empty($config->ziwo_token)) {
+            return response()->json([
+                'status'  => 'error',
+                'calls'   => [],
+                'message' => 'Agent not authenticated with telephony gateway',
+            ], 400);
+        }
+
+        $limit  = max(1, min(200, (int) $request->input('limit', 50)));
+        $skip   = max(0, (int) $request->input('skip', 0));
+        $resp   = $this->client->getAgentCallHistory($config->ziwo_token, $limit, $skip);
+
+        if (($resp['result'] ?? false) !== true) {
+            return response()->json([
+                'status'  => 'error',
+                'calls'   => [],
+                'message' => $resp['message'] ?? 'ZIWO returned an error',
+            ], 502);
+        }
+
+        $raw = $resp['content'] ?? [];
+        $calls = collect($raw)->map(function ($c) {
+            $direction = $c['direction'] ?? 'unknown';
+
+            // For outbound, ZIWO's callerIDNumber is the trunk/PBX itself
+            // (e.g. "8778150"); the dialed destination is in didCalled or
+            // embedded in channelName ("verto.rtc/+923002551224").
+            $dialed = $c['didCalled'] ?? $this->extractDialedFromChannel($c['channelName'] ?? '');
+            $incomingNumber = $c['callerIDNumber'] ?? $c['callerIDName'] ?? null;
+            $displayNumber = $direction === 'outbound' ? ($dialed ?: $incomingNumber) : $incomingNumber;
+            $redialTarget = $direction === 'outbound' ? ($dialed ?: $incomingNumber) : $incomingNumber;
+
+            $customer = $c['customer'] ?? [];
+            $customerName = trim(
+                ($customer['firstName'] ?? '') . ' ' . ($customer['lastName'] ?? '')
+            );
+
+            $startedAt = $c['startedAt'] ?? null;
+            $timeAgo = $startedAt ? $this->timeAgoIso($startedAt) : null;
+
+            return [
+                'call_id'        => $c['callID'] ?? $c['id'] ?? null,
+                'caller_number'  => $displayNumber,
+                'dialed_number'  => $dialed,
+                'redial_number'  => $redialTarget,
+                'caller_name'    => $customerName !== '' ? $customerName : null,
+                'direction'      => $direction,
+                'status'         => $c['result']   ?? $c['disposition'] ?? 'unknown',
+                'duration_sec'   => (int)($c['duration']  ?? 0),
+                'talk_time'      => (int)($c['talkTime']  ?? 0),
+                'ring_time'      => (int)($c['ringTime']  ?? 0),
+                'queue_name'     => $c['queueName'] ?? null,
+                'started_at'     => $startedAt,
+                'started_at_iso' => $startedAt,
+                'time_ago'       => $timeAgo,
+                'ended_at'       => $c['endedAt']   ?? null,
+                'recording_file' => $c['recordingFile'] ?? null,
+                'source'         => 'ziwo_live',
+            ];
+        })->values()->all();
+
+        return response()->json([
+            'status' => 'success',
+            'calls'  => $calls,
+            'count'  => count($calls),
+        ]);
+    }
+
+    /**
+     * Extract the dialled phone number from a ZIWO channelName string.
+     * Recognised prefixes:
+     *   "verto.rtc/<number>"        → <number>   (agent leg)
+     *   "sofia/external/<number>"   → <number>   (PBX outbound to PSTN)
+     *   "sofia/internal/<number>"   → null       (inbound from DID — caller id is the customer)
+     *   "sofia/internal/<ip>"       → null       (network address, not a number)
+     */
+    private function extractDialedFromChannel(string $channelName): ?string
+    {
+        if ($channelName === '') return null;
+        foreach (['verto.rtc/', 'sofia/external/'] as $prefix) {
+            if (str_starts_with($channelName, $prefix)) {
+                $rest = substr($channelName, strlen($prefix));
+                // Strip anything after '@' (e.g. '@10.80.11.55')
+                if (($at = strpos($rest, '@')) !== false) {
+                    $rest = substr($rest, 0, $at);
+                }
+                return $rest !== '' ? $rest : null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Convert a ZIWO ISO timestamp into a short human-friendly "X ago" string.
+     */
+    private function timeAgoIso(?string $iso): ?string
+    {
+        if (!$iso) return null;
+        try {
+            $then = new \DateTimeImmutable($iso);
+        } catch (\Exception) {
+            return null;
+        }
+        $now  = new \DateTimeImmutable('now', $then->getTimezone());
+        $diff = $now->getTimestamp() - $then->getTimestamp();
+        if ($diff < 0)   return 'just now';
+        if ($diff < 60)   return $diff . 's ago';
+        if ($diff < 3600) return floor($diff / 60) . 'm ago';
+        if ($diff < 86400) return floor($diff / 3600) . 'h ago';
+        return floor($diff / 86400) . 'd ago';
+    }
+
+    /**
+     * POST /telephony/status — Set agent presence/availability.
+     * Body: { status: "available"|"meeting"|"break"|"outgoing" }
+     *
+     * The ZIWO proxy has no HTTP set-status endpoint (probed 404 across all
+     * candidate paths). Status changes are driven by the SDK on the client.
+     * This endpoint persists the requested state locally and returns OK.
+     */
+    public function setStatus(Request $request)
+    {
+        $request->validate([
+            'status' => 'required|in:available,meeting,break,outgoing',
+        ]);
+
+        $userId = auth()->id();
+        $user = $request->user();
+        $config = $this->repository->getAgentConfig($userId);
+
+        if (!$config || empty($config->ziwo_token)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Agent not authenticated with telephony gateway',
+            ], 400);
+        }
+
+        $result = $this->service->setAgentStatus(
+            $userId,
+            $user->username ?? $user->email,
+            $config->ziwo_token,
+            $request->input('status')
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * GET /telephony/status/live — pull current live presence from ZIWO.
+     * Maps /profile.liveInfo.status to the UI's 4-state vocabulary.
+     */
+    public function refreshLiveStatus(Request $request)
+    {
+        $userId = auth()->id();
+        $config = $this->repository->getAgentConfig($userId);
+        if (!$config || empty($config->ziwo_token)) {
+            return response()->json([
+                'status'       => 'error',
+                'agent_status' => 'offline',
+            ], 400);
+        }
+        $resp = $this->client->getAgentLiveStatus($config->ziwo_token);
+        if (!is_array($resp) || ($resp['result'] ?? false) !== true) {
+            return response()->json($resp ?: ['status' => 'error', 'agent_status' => 'offline'], 502);
+        }
+        $raw = $resp['agent_status'] ?? 'Offline';
+        $mapped = $this->mapZiwoStatusToUi($raw);
+        $this->repository->updateAgentStatus($userId, $mapped);
+        session(["phone_agent_status_{$userId}" => $mapped]);
+        return response()->json([
+            'status'       => 'success',
+            'agent_status' => $mapped,
+            'ziwo_status'  => $raw,
+        ]);
+    }
+
+    private function mapZiwoStatusToUi(string $ziwoStatus): string
+    {
+        return match (strtolower($ziwoStatus)) {
+            'available', 'ready'        => 'available',
+            'on break', 'break', 'away' => 'break',
+            'meeting'                   => 'meeting',
+            'outgoing', 'busy'          => 'outgoing',
+            default                     => 'offline',
+        };
     }
 
     /**
@@ -303,6 +508,73 @@ class TelephonyController extends Controller
     }
 
     /**
+     * Search the live ZIWO CRM for contacts matching the query.
+     * Probed live: GET /agent/crm/customers?dataset=tags&order=name&limit=500&skip=0
+     *   → { result, content: [{ id, firstName, lastName, phone, ... }] }
+     * Server-side filter on phone/name to keep the wire payload small.
+     */
+    public function searchCrm(Request $request)
+    {
+        $userId = auth()->id();
+        $config = $this->repository->getAgentConfig($userId);
+        if (!$config || empty($config->ziwo_token)) {
+            return response()->json(['status' => 'error', 'contacts' => [], 'message' => 'Agent not authenticated']);
+        }
+
+        $query    = strtolower(trim((string)$request->input('query', '')));
+        $limit    = (int)$request->input('limit', 500);
+        $limit    = max(1, min(1000, $limit));
+        $proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
+
+        // Pass `q` to ZIWO so the proxy can filter server-side, and `dataset`
+        // as a repeated query param (tags + notes).
+        $url = $proxyUrl . '/agent/crm/customers'
+            . '?dataset=tags&dataset=notes'
+            . '&order=name&limit=' . $limit . '&skip=0'
+            . ($query !== '' ? '&q=' . urlencode($query) : '');
+
+        $response = \Illuminate\Support\Facades\Http::withHeaders([
+            'Accept'       => 'application/json',
+            'access_token' => $config->ziwo_token,
+        ])->timeout(10)->get($url);
+
+        if (!$response->successful()) {
+            \Illuminate\Support\Facades\Log::warning("ZIWO CRM search returned [{$response->status()}]: {$response->body()}");
+            return response()->json([
+                'status'   => 'error',
+                'contacts' => [],
+                'message'  => "ZIWO CRM returned HTTP {$response->status()}",
+            ], $response->status());
+        }
+
+        $body = $response->json();
+        $raw  = $body['content'] ?? $body['customers'] ?? $body['data'] ?? [];
+
+        $contacts = collect($raw)->map(function ($c) {
+            $first = $c['firstName'] ?? '';
+            $last  = $c['lastName']  ?? '';
+            $name  = trim($first . ' ' . $last);
+            if ($name === '') {
+                $name = $c['phone'] ?? 'Unknown';
+            }
+            return [
+                'id'            => $c['id'] ?? null,
+                'name'          => $name,
+                'phone'         => $c['phone'] ?? '',
+                'email'         => $c['email'] ?? null,
+                'tags'          => $c['tags']  ?? [],
+                'source'        => 'ziwo_crm',
+            ];
+        })->filter(function ($c) use ($query) {
+            if ($query === '') return true;
+            return str_contains(strtolower($c['name']), $query)
+                || str_contains(strtolower($c['phone']), $query);
+        })->values()->all();
+
+        return response()->json(['status' => 'success', 'contacts' => $contacts]);
+    }
+
+    /**
      * Search and retrieve phonebook contacts.
      */
     public function searchPhonebook(Request $request)
@@ -362,8 +634,9 @@ class TelephonyController extends Controller
 
     /**
      * Fetch the list of active ZIWO queues for the authenticated agent.
-     * Returns real queue data from the ZIWO API so the softphone transfer
-     * panel shows live queue names instead of hardcoded mock data.
+     * Live path (probed against nayatel-api.aswat.co):
+     *   GET /agent/queues?limit=500&skip=0
+     * Returns { result, content: [{ id, name, extension, agents: [...], ... }] }
      */
     public function getQueues(Request $request)
     {
@@ -374,60 +647,46 @@ class TelephonyController extends Controller
             return response()->json(['status' => 'error', 'queues' => [], 'message' => 'Agent not authenticated']);
         }
 
-        try {
-            $isMock = (bool) config('services.ziwo.mock', false);
+        $proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
+        $response = \Illuminate\Support\Facades\Http::withHeaders([
+            'Accept'       => 'application/json',
+            'access_token' => $config->ziwo_token,
+        ])->timeout(8)->get("{$proxyUrl}/agent/queues", [
+            'limit'   => 500,
+            'skip'    => 0,
+            'dataset' => ['agents', 'stats'],
+        ]);
 
-            if ($isMock) {
-                // Return structured mock queues in production-compatible format
-                return response()->json([
-                    'status' => 'success',
-                    'queues' => [
-                        ['id' => '3001', 'name' => 'Support',   'number' => '3001', 'agents' => 5, 'waiting' => 2],
-                        ['id' => '3002', 'name' => 'Sales',     'number' => '3002', 'agents' => 3, 'waiting' => 0],
-                        ['id' => '3003', 'name' => 'Dispatch',  'number' => '3003', 'agents' => 4, 'waiting' => 1],
-                        ['id' => '3004', 'name' => 'Billing',   'number' => '3004', 'agents' => 2, 'waiting' => 3],
-                    ],
-                    'is_mock' => true,
-                ]);
-            }
-
-            // ── Live ZIWO API: GET /queues ──
-            // ZIWO API endpoint for queues list uses the agent's access_token header.
-            $proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Accept'       => 'application/json',
-                'access_token' => $config->ziwo_token,
-            ])->timeout(8)->get("{$proxyUrl}/queues");
-
-            if ($response->successful()) {
-                $body = $response->json();
-                // ZIWO returns: { result: true, content: [ { id, name, queueNumber, ... } ] }
-                $rawQueues = $body['content'] ?? $body['queues'] ?? $body['data'] ?? [];
-                $queues = collect($rawQueues)->map(function ($q) {
-                    return [
-                        'id'      => $q['id'] ?? $q['queueNumber'] ?? $q['number'] ?? '',
-                        'name'    => $q['name'] ?? $q['label'] ?? 'Queue',
-                        'number'  => $q['queueNumber'] ?? $q['number'] ?? $q['id'] ?? '',
-                        'agents'  => $q['agentCount'] ?? $q['agents'] ?? 0,
-                        'waiting' => $q['waitingCount'] ?? $q['waiting'] ?? 0,
-                    ];
-                })->values()->all();
-
-                return response()->json(['status' => 'success', 'queues' => $queues, 'is_mock' => false]);
-            }
-
-            \Illuminate\Support\Facades\Log::warning("ZIWO queues API returned [{$response->status()}]: {$response->body()}");
-            return response()->json(['status' => 'success', 'queues' => [], 'is_mock' => false, 'note' => 'No queues returned from gateway']);
-
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error("ZIWO getQueues exception: {$e->getMessage()}");
-            return response()->json(['status' => 'error', 'queues' => [], 'message' => 'Failed to fetch queues'], 500);
+        if (!$response->successful()) {
+            \Illuminate\Support\Facades\Log::warning("ZIWO agent/queues API returned [{$response->status()}]: {$response->body()}");
+            return response()->json([
+                'status'  => 'error',
+                'queues'  => [],
+                'message' => "ZIWO /agent/queues returned HTTP {$response->status()}",
+            ], $response->status());
         }
+
+        $body = $response->json();
+        $rawQueues = $body['content'] ?? $body['queues'] ?? $body['data'] ?? [];
+        $queues = collect($rawQueues)->map(function ($q) {
+            $ext = $q['extension'] ?? $q['queueNumber'] ?? $q['number'] ?? $q['id'] ?? '';
+            return [
+                'id'      => (string)($q['id'] ?? $ext),
+                'name'    => $q['name'] ?? 'Queue',
+                'number'  => (string)$ext,
+                'agents'  => is_array($q['agents'] ?? null) ? count($q['agents']) : ($q['agentCount'] ?? 0),
+                'waiting' => $q['waitingCount'] ?? $q['waiting'] ?? 0,
+            ];
+        })->values()->all();
+
+        return response()->json(['status' => 'success', 'queues' => $queues]);
     }
 
     /**
      * Fetch the list of active ZIWO teammates (agents) for the authenticated agent.
-     * Returns real teammate agent records from ZIWO API.
+     * Live path (probed against nayatel-api.aswat.co):
+     *   GET /agents/channels/calls/listAgents
+     * Returns { result, content: [{ id, firstName, lastName, ccLogin, ... }] }
      */
     public function getTeammates(Request $request)
     {
@@ -438,79 +697,148 @@ class TelephonyController extends Controller
             return response()->json(['status' => 'error', 'teammates' => [], 'message' => 'Agent not authenticated']);
         }
 
-        try {
-            $isMock = (bool) config('services.ziwo.mock', false);
+        $proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
+        $response = \Illuminate\Support\Facades\Http::withHeaders([
+            'Accept'       => 'application/json',
+            'access_token' => $config->ziwo_token,
+        ])->timeout(8)->get("{$proxyUrl}/agents/channels/calls/listAgents");
 
-            if ($isMock) {
-                return response()->json([
-                    'status' => 'success',
-                    'teammates' => [
-                        ['id' => 1, 'name' => 'Safdar Hussain',  'ext' => '101', 'status' => 'online',  'number' => '+921000000101'],
-                        ['id' => 2, 'name' => 'Ahmed Raza',       'ext' => '102', 'status' => 'online',  'number' => '+921000000102'],
-                        ['id' => 3, 'name' => 'Sara Khan',        'ext' => '103', 'status' => 'busy',    'number' => '+921000000103'],
-                        ['id' => 4, 'name' => 'John Carter',      'ext' => '104', 'status' => 'offline', 'number' => '+921000000104'],
-                        ['id' => 5, 'name' => 'Maria Lopez',      'ext' => '105', 'status' => 'online',  'number' => '+921000000105'],
-                    ],
-                    'is_mock' => true,
-                ]);
-            }
-
-            // ── Live ZIWO API: GET /admin/users ──
-            $proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
-            $response = \Illuminate\Support\Facades\Http::withHeaders([
-                'Accept'       => 'application/json',
-                'access_token' => $config->ziwo_token,
-            ])->timeout(8)->get("{$proxyUrl}/admin/users");
-
-            if ($response->successful()) {
-                $body = $response->json();
-                $rawUsers = $body['content'] ?? $body['users'] ?? $body['data'] ?? [];
-                
-                $teammates = collect($rawUsers)->map(function ($u, $idx) {
-                    $firstName = $u['firstName'] ?? '';
-                    $lastName = $u['lastName'] ?? '';
-                    $fullName = trim($firstName . ' ' . $lastName);
-                    if (empty($fullName)) {
-                        $fullName = $u['username'] ?? $u['email'] ?? 'Agent';
-                    }
-                    
-                    // ZIWO agent status mapping
-                    $rawStatus = strtolower($u['status'] ?? $u['ccStatus'] ?? 'offline');
-                    $status = 'offline';
-                    if (in_array($rawStatus, ['online', 'available', 'active', 'ready'])) {
-                        $status = 'online';
-                    } elseif (in_array($rawStatus, ['busy', 'speaking', 'oncall', 'on call'])) {
-                        $status = 'busy';
-                    }
-
-                    // Extract first available number (contactNumber or extension)
-                    $ext = $u['contactNumber'] ?? $u['ccLogin'] ?? $u['extension'] ?? '';
-                    if (empty($ext)) {
-                        $ext = $u['username'] ?? '';
-                    }
-                    
-                    return [
-                        'id'     => $u['id'] ?? $idx + 1,
-                        'name'   => $fullName,
-                        'ext'    => $ext,
-                        'status' => $status,
-                        'number' => $ext, // dialable number
-                    ];
-                })->filter(function ($t) {
-                    return !empty($t['ext']);
-                })->values()->all();
-
-                return response()->json(['status' => 'success', 'teammates' => $teammates, 'is_mock' => false]);
-            }
-
-            \Illuminate\Support\Facades\Log::warning("ZIWO admin/users API returned [{$response->status()}]: {$response->body()}");
-            return response()->json(['status' => 'success', 'teammates' => [], 'is_mock' => false, 'note' => 'No teammates returned from gateway']);
-
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error("ZIWO getTeammates exception: {$e->getMessage()}");
-            return response()->json(['status' => 'error', 'teammates' => [], 'message' => 'Failed to fetch teammates'], 500);
+        if (!$response->successful()) {
+            \Illuminate\Support\Facades\Log::warning("ZIWO listAgents API returned [{$response->status()}]: {$response->body()}");
+            return response()->json([
+                'status'     => 'error',
+                'teammates'  => [],
+                'message'    => "ZIWO /agents/channels/calls/listAgents returned HTTP {$response->status()}",
+            ], $response->status());
         }
+
+        $body = $response->json();
+        $rawUsers = $body['content'] ?? $body['users'] ?? $body['data'] ?? [];
+
+        $teammates = collect($rawUsers)->map(function ($u, $idx) {
+            $firstName = $u['firstName'] ?? '';
+            $lastName  = $u['lastName'] ?? '';
+            $fullName  = trim($firstName . ' ' . $lastName);
+            if (empty($fullName)) {
+                $fullName = $u['username'] ?? $u['email'] ?? 'Agent';
+            }
+
+            $rawStatus = strtolower($u['status'] ?? 'active');
+            $status = match (true) {
+                in_array($rawStatus, ['active', 'online', 'available', 'ready']) => 'online',
+                in_array($rawStatus, ['busy', 'oncall', 'speaking'])              => 'busy',
+                in_array($rawStatus, ['break', 'away', 'paused'])                  => 'away',
+                in_array($rawStatus, ['meeting', 'dnd'])                          => 'meeting',
+                default                                                          => 'offline',
+            };
+
+            $ext = $u['ccLogin'] ?? $u['contactNumber'] ?? '';
+            if (empty($ext)) {
+                $ext = (string)($u['id'] ?? '');
+            }
+
+            return [
+                'id'     => $u['id'] ?? $idx + 1,
+                'name'   => $fullName,
+                'ext'    => (string)$ext,
+                'status' => $status,
+                'number' => (string)$ext,
+            ];
+        })->values()->all();
+
+        return response()->json(['status' => 'success', 'teammates' => $teammates]);
     }
+
+    /**
+     * Roster of agents (local users with telephony config OR 'agent' role),
+     * enriched with live ZIWO presence. Used by the teammates list in the
+     * transfer overlay and the Add-or-Call panel. Sorted online-first.
+     */
+    public function agents(Request $request)
+    {
+        $localUsers = \App\Models\User::query()
+            ->where(function ($q) {
+                $q->whereHas('telephonyAgentConfig')
+                  ->orWhereHas('roles', fn ($r) => $r->where('name', 'agent'));
+            })
+            ->with('telephonyAgentConfig')
+            ->get();
+
+        // Try to fetch live presence from ZIWO; tolerate failure (fall back to DB status).
+        $ziwoIndex = [];
+        $config = $this->repository->getAgentConfig(auth()->id());
+        if ($config && !empty($config->ziwo_token) && !(bool) config('services.ziwo.mock', false)) {
+            try {
+                $proxyUrl = rtrim(config('services.ziwo.proxy_url', 'https://nayatel-api.aswat.co'), '/');
+                $resp = \Illuminate\Support\Facades\Http::withHeaders([
+                    'Accept' => 'application/json',
+                    'access_token' => $config->ziwo_token,
+                ])->timeout(5)->get("{$proxyUrl}/agents/channels/calls/listAgents");
+                if ($resp->successful()) {
+                    foreach (($resp->json()['content'] ?? []) as $u) {
+                        $key = $u['username'] ?? $u['ccLogin'] ?? null;
+                        if ($key) $ziwoIndex[$key] = $u;
+                    }
+                }
+            } catch (\Exception $e) {
+                // ignore — we'll fall back to local agent_status
+            }
+        }
+
+        $agents = $localUsers->map(function ($u) use ($ziwoIndex) {
+            $ziwoUser = $u->telephonyAgentConfig?->ziwo_username
+                ? ($ziwoIndex[$u->telephonyAgentConfig->ziwo_username] ?? null)
+                : null;
+            $ext = $ziwoUser['contactNumber'] ?? $ziwoUser['ccLogin'] ?? $ziwoUser['extension']
+                ?? $u->telephonyAgentConfig?->ziwo_username ?? '';
+            $raw = strtolower($ziwoUser['status'] ?? $ziwoUser['ccStatus']
+                ?? $u->telephonyAgentConfig?->agent_status ?? 'offline');
+            $status = match (true) {
+                in_array($raw, ['available','online','active','ready']) => 'available',
+                in_array($raw, ['busy','speaking','on-call','oncall','on call']) => 'on-call',
+                in_array($raw, ['away','break','lunch','training']) => 'away',
+                $raw === 'break' => 'break',
+                default => 'offline',
+            };
+            return [
+                'id' => $u->id,
+                'name' => $u->name,
+                'ext' => (string) $ext,
+                'number' => (string) $ext,
+                'status' => $status,
+                'ziwo_username' => $u->telephonyAgentConfig?->ziwo_username,
+                'updated_at' => $u->telephonyAgentConfig?->last_status_change_at?->toIso8601String(),
+            ];
+        })->sortBy(fn ($a) => match ($a['status']) {
+            'available' => 0, 'on-call' => 1, 'away' => 2, 'break' => 3, default => 4,
+        })->values();
+
+        return response()->json(['status' => 'success', 'agents' => $agents, 'count' => $agents->count()]);
+    }
+
+    /**
+     * Live status for a single agent (used when roster > 50 or for targeted refresh).
+     */
+    public function agentStatus(Request $request, $userId)
+    {
+        $u = \App\Models\User::with('telephonyAgentConfig')->find($userId);
+        if (!$u) return response()->json(['status' => 'error', 'message' => 'Not found'], 404);
+        $cfg = $u->telephonyAgentConfig;
+        $raw = strtolower($cfg?->agent_status ?? 'offline');
+        $status = match (true) {
+            in_array($raw, ['available','online','active','ready']) => 'available',
+            in_array($raw, ['busy','speaking','on-call']) => 'on-call',
+            in_array($raw, ['away','break']) => 'away',
+            default => 'offline',
+        };
+        return response()->json([
+            'status' => 'success',
+            'user_id' => $u->id,
+            'agent_status' => $status,
+            'updated_at' => $cfg?->last_status_change_at?->toIso8601String(),
+        ]);
+    }
+
     /**
      * Diagnostic endpoint: returns the last N raw webhook payloads.
      *

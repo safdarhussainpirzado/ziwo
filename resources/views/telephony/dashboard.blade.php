@@ -311,97 +311,106 @@
 </div>
 
 <script>
-    document.addEventListener('alpine:init', () => {
-        Alpine.data('telephonyDashboard', () => ({
-            refreshing: false,
-            liveStats: {
-                active_calls_count: {{ $analytics['active_calls_count'] ?? 0 }},
-                live_agents: @json($analytics['live_agents'] ?? []),
-                total_calls: {{ $analytics['total_calls'] ?? 0 }},
-                completed_calls: {{ $analytics['completed_calls'] ?? 0 }},
-                missed_calls: {{ $analytics['missed_calls'] ?? 0 }},
-                sla_percentage: {{ $analytics['sla_percentage'] ?? 100 }},
-            },
-            hourlyTraffic: @json($analytics['hourly_distribution'] ?? []),
-            chartInstance: null,
+    (function() {
+        function registerTelephonyDashboard() {
+            Alpine.data('telephonyDashboard', () => ({
+                refreshing: false,
+                liveStats: {
+                    active_calls_count: {{ $analytics['active_calls_count'] ?? 0 }},
+                    live_agents: @json($analytics['live_agents'] ?? []),
+                    total_calls: {{ $analytics['total_calls'] ?? 0 }},
+                    completed_calls: {{ $analytics['completed_calls'] ?? 0 }},
+                    missed_calls: {{ $analytics['missed_calls'] ?? 0 }},
+                    sla_percentage: {{ $analytics['sla_percentage'] ?? 100 }},
+                },
+                hourlyTraffic: @json($analytics['hourly_distribution'] ?? []),
+                chartInstance: null,
 
-            init() {
-                this.renderChart();
-                
-                // Set up polling every 5 seconds for live status updates
-                setInterval(() => {
-                    this.refreshData(false);
-                }, 5000);
-            },
+                init() {
+                    this.renderChart();
 
-            get onlineAgentsCount() {
-                return this.liveStats.live_agents.filter(a => a.status !== 'offline').length;
-            },
+                    setInterval(() => {
+                        this.refreshData(false);
+                    }, 5000);
+                },
 
-            async refreshData(showIndicator = false) {
-                if (showIndicator) this.refreshing = true;
-                try {
-                    const response = await fetch('{{ route("admin.telephony.live-stats") }}');
-                    const data = await response.json();
-                    if (data.status === 'success') {
-                        this.liveStats.active_calls_count = data.active_calls_count;
-                        this.liveStats.live_agents = data.live_agents;
-                        this.liveStats.total_calls = data.total_calls;
-                        this.liveStats.completed_calls = data.completed_calls;
-                        this.liveStats.missed_calls = data.missed_calls;
-                        this.liveStats.sla_percentage = data.sla_percentage;
+                get onlineAgentsCount() {
+                    return this.liveStats.live_agents.filter(a => a.status !== 'offline').length;
+                },
+
+                async refreshData(showIndicator = false) {
+                    if (showIndicator) this.refreshing = true;
+                    try {
+                        const response = await fetch('{{ route("admin.telephony.live-stats") }}');
+                        const data = await response.json();
+                        if (data.status === 'success') {
+                            this.liveStats.active_calls_count = data.active_calls_count;
+                            this.liveStats.live_agents = data.live_agents;
+                            this.liveStats.total_calls = data.total_calls;
+                            this.liveStats.completed_calls = data.completed_calls;
+                            this.liveStats.missed_calls = data.missed_calls;
+                            this.liveStats.sla_percentage = data.sla_percentage;
+                        }
+                    } catch (e) {
+                        console.error("Dashboard Polling Error: ", e);
+                    } finally {
+                        if (showIndicator) this.refreshing = false;
                     }
-                } catch (e) {
-                    console.error("Dashboard Polling Error: ", e);
-                } finally {
-                    if (showIndicator) this.refreshing = false;
-                }
-            },
+                },
 
-            renderChart() {
-                const ctx = document.getElementById('hourlyCallChart').getContext('2d');
-                const labels = Array.from({ length: 24 }, (_, i) => `${i}:00`);
-                const dataValues = Array.from({ length: 24 }, (_, i) => this.hourlyTraffic[i] || 0);
+                renderChart() {
+                    const ctx = document.getElementById('hourlyCallChart');
+                    if (!ctx) return;
+                    const ctx2d = ctx.getContext('2d');
+                    const labels = Array.from({ length: 24 }, (_, i) => `${i}:00`);
+                    const dataValues = Array.from({ length: 24 }, (_, i) => this.hourlyTraffic[i] || 0);
 
-                if (this.chartInstance) {
-                    this.chartInstance.destroy();
-                }
+                    if (this.chartInstance) {
+                        this.chartInstance.destroy();
+                    }
 
-                this.chartInstance = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Call Volume',
-                            data: dataValues,
-                            backgroundColor: 'rgba(99, 102, 241, 0.25)',
-                            borderColor: 'rgba(99, 102, 241, 1)',
-                            borderWidth: 2,
-                            borderRadius: 6,
-                            tension: 0.4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { display: false }
+                    this.chartInstance = new Chart(ctx2d, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: 'Call Volume',
+                                data: dataValues,
+                                backgroundColor: 'rgba(99, 102, 241, 0.25)',
+                                borderColor: 'rgba(99, 102, 241, 1)',
+                                borderWidth: 2,
+                                borderRadius: 6,
+                                tension: 0.4
+                            }]
                         },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                grid: { color: '#f1f5f9' },
-                                ticks: { stepSize: 1, color: '#94a3b8' }
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false }
                             },
-                            x: {
-                                grid: { display: false },
-                                ticks: { color: '#94a3b8' }
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    grid: { color: '#f1f5f9' },
+                                    ticks: { stepSize: 1, color: '#94a3b8' }
+                                },
+                                x: {
+                                    grid: { display: false },
+                                    ticks: { color: '#94a3b8' }
+                                }
                             }
                         }
-                    }
-                });
-            }
-        }));
-    });
+                    });
+                }
+            }));
+        }
+
+        if (window.Alpine) {
+            registerTelephonyDashboard();
+        } else {
+            document.addEventListener('alpine:init', registerTelephonyDashboard);
+        }
+    })();
 </script>
 @endsection

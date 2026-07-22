@@ -120,6 +120,8 @@ Route::middleware('auth')->group(function () {
         Route::post('/recording', [\App\Http\Controllers\TelephonyController::class, 'toggleRecording'])->name('recording');
         Route::get('/queues', [\App\Http\Controllers\TelephonyController::class, 'getQueues'])->name('queues');
         Route::get('/teammates', [\App\Http\Controllers\TelephonyController::class, 'getTeammates'])->name('teammates');
+        Route::post('/status/set', [\App\Http\Controllers\TelephonyController::class, 'setStatus'])->name('status.set');
+        Route::get('/status/live', [\App\Http\Controllers\TelephonyController::class, 'refreshLiveStatus'])->name('status.live');
 
         // Diagnostic endpoints — view raw webhook payloads and probe PBX call-history
         Route::get('/diagnostics/webhooks', [\App\Http\Controllers\TelephonyController::class, 'diagnosticWebhooks'])->name('diagnostics.webhooks');
@@ -127,14 +129,26 @@ Route::middleware('auth')->group(function () {
 
         // Centralized Phonebook
         Route::get('/phonebook', [\App\Http\Controllers\TelephonyController::class, 'searchPhonebook'])->name('phonebook.search');
+        Route::get('/crm/search', [\App\Http\Controllers\TelephonyController::class, 'searchCrm'])->name('crm.search');
         Route::post('/phonebook', [\App\Http\Controllers\TelephonyController::class, 'storePhonebook'])->name('phonebook.store');
         Route::delete('/phonebook/{id}', [\App\Http\Controllers\TelephonyController::class, 'destroyPhonebook'])->name('phonebook.destroy');
+        Route::get('/calls/live', [\App\Http\Controllers\TelephonyController::class, 'liveCallHistory'])->name('calls.live');
     });
 
     // Telephony Admin Dashboard
     Route::middleware('can:dashboard.view')->group(function() {
         Route::get('mgmt/telephony', [\App\Http\Controllers\TelephonyAdminController::class, 'index'])->name('admin.telephony.index');
         Route::get('mgmt/telephony/live-stats', [\App\Http\Controllers\TelephonyAdminController::class, 'getLiveStats'])->name('admin.telephony.live-stats');
+        // Admin dashboard proxy API (reads via Aswat proxy)
+        Route::get('mgmt/telephony/agents', [\App\Http\Controllers\TelephonyAdminController::class, 'getAgents'])->name('admin.telephony.agents');
+        Route::get('mgmt/telephony/agents/{username}', [\App\Http\Controllers\TelephonyAdminController::class, 'getAgentDetail'])->name('admin.telephony.agent-detail');
+        Route::get('mgmt/telephony/calls/history', [\App\Http\Controllers\TelephonyAdminController::class, 'getCallHistory'])->name('admin.telephony.call-history');
+        Route::get('mgmt/telephony/wallboard', [\App\Http\Controllers\TelephonyAdminController::class, 'getWallboard'])->name('admin.telephony.wallboard');
+        Route::get('mgmt/telephony/queues', [\App\Http\Controllers\TelephonyAdminController::class, 'getQueues'])->name('admin.telephony.queues');
+        Route::get('mgmt/telephony/recordings/{callId}', [\App\Http\Controllers\TelephonyAdminController::class, 'getCallRecording'])->name('admin.telephony.recording');
+        // Admin dashboard pages
+        Route::get('ziwo/dashboard', [\App\Http\Controllers\TelephonyAdminController::class, 'dashboard'])->name('ziwo.dashboard');
+        Route::get('ziwo/statistics', [\App\Http\Controllers\TelephonyAdminController::class, 'statistics'])->name('ziwo.statistics');
     });
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

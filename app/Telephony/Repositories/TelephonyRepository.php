@@ -35,6 +35,13 @@ class TelephonyRepository implements TelephonyRepositoryInterface
         return TelephonyAgentConfig::where('user_id', $userId)->first();
     }
 
+    public function getFirstAdminConfig(): ?TelephonyAgentConfig
+    {
+        return TelephonyAgentConfig::whereNotNull('ziwo_token')
+            ->where('ziwo_token', '!=', '')
+            ->first();
+    }
+
     public function updateAgentStatus(int $userId, string $status): bool
     {
         return (bool)TelephonyAgentConfig::where('user_id', $userId)->update([

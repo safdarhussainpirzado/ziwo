@@ -5,8 +5,62 @@
 @tailwind components;
 @tailwind utilities;
 
-
 /* Custom grid utility not available in base Tailwind */
 .grid-cols-24 {
     grid-template-columns: repeat(24, minmax(0, 1fr));
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   PREMIUM SOFTPHONE — Hardcoded CSS fallback
+   These classes are used by partials/softphone/*.blade.php but
+   Tailwind's JIT scanner may miss them in @include'd partials.
+   Defined here as explicit CSS so the build always includes them.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Panel background (solid dark) */
+.bg-\[\#0B1220\] { background-color: #0B1220 !important; }
+.bg-\[\#0F172A\] { background-color: #0F172A !important; }
+.bg-\[\#0F172A\]\/80 { background-color: rgba(15, 23, 42, 0.8) !important; }
+.bg-\[\#0F172A\]\/60 { background-color: rgba(15, 23, 42, 0.6) !important; }
+.bg-\[\#0F172A\]\/40 { background-color: rgba(15, 23, 42, 0.4) !important; }
+.bg-\[\#0F172A\]\/50 { background-color: rgba(15, 23, 42, 0.5) !important; }
+.bg-\[\#1E293B\] { background-color: #1E293B !important; }
+.bg-\[\#1E293B\]\/60 { background-color: rgba(30, 41, 59, 0.6) !important; }
+.bg-\[\#334155\] { background-color: #334155 !important; }
+
+/* Gradient stops with opacity */
+.from-slate-900 { --tw-gradient-from: #0f172a var(--tw-gradient-from-position) !important; }
+.from-emerald-500\/40 { --tw-gradient-from: rgba(16, 185, 129, 0.4) var(--tw-gradient-from-position) !important; }
+.from-emerald-600\/30 { --tw-gradient-from: rgba(5, 150, 105, 0.3) var(--tw-gradient-from-position) !important; }
+.from-emerald-900\/30 { --tw-gradient-from: rgba(6, 78, 59, 0.3) var(--tw-gradient-from-position) !important; }
+.from-indigo-500\/40 { --tw-gradient-from: rgba(99, 102, 241, 0.4) var(--tw-gradient-from-position) !important; }
+.from-indigo-500\/30 { --tw-gradient-from: rgba(99, 102, 241, 0.3) var(--tw-gradient-from-position) !important; }
+.from-amber-600\/30 { --tw-gradient-from: rgba(217, 119, 6, 0.3) var(--tw-gradient-from-position) !important; }
+.from-amber-600\/15 { --tw-gradient-from: rgba(217, 119, 6, 0.15) var(--tw-gradient-from-position) !important; }
+
+.via-\[\#0F172A\] { --tw-gradient-via: #0F172A var(--tw-gradient-via-position) !important; }
+.via-emerald-950\/60 { --tw-gradient-via: rgba(2, 44, 34, 0.6) var(--tw-gradient-via-position) !important; }
+.via-emerald-950\/40 { --tw-gradient-via: rgba(2, 44, 34, 0.4) var(--tw-gradient-via-position) !important; }
+.via-indigo-950\/60 { --tw-gradient-via: rgba(30, 27, 75, 0.6) var(--tw-gradient-via-position) !important; }
+.via-amber-950\/40 { --tw-gradient-via: rgba(69, 26, 3, 0.4) var(--tw-gradient-via-position) !important; }
+.via-slate-900 { --tw-gradient-via: #0f172a var(--tw-gradient-via-position) !important; }
+
+.to-\[\#0B1220\] { --tw-gradient-to: #0B1220 var(--tw-gradient-to-position) !important; }
+.to-\[\#050B14\] { --tw-gradient-to: #050B14 var(--tw-gradient-to-position) !important; }
+.to-\[\#050614\] { --tw-gradient-to: #050614 var(--tw-gradient-to-position) !important; }
+.to-\[\#021A12\] { --tw-gradient-to: #021A12 var(--tw-gradient-to-position) !important; }
+.to-\[\#1A1303\] { --tw-gradient-to: #1A1303 var(--tw-gradient-to-position) !important; }
+.to-indigo-950\/40 { --tw-gradient-to: rgba(30, 27, 75, 0.4) var(--tw-gradient-to-position) !important; }
+.to-transparent { --tw-gradient-to: transparent var(--tw-gradient-to-position) !important; }
+
+/* Input focus enhancements */
+.focus\:ring-indigo-500\/40:focus { --tw-ring-color: rgba(99, 102, 241, 0.4) !important; }
+.focus\:ring-indigo-500\/20:focus { --tw-ring-color: rgba(99, 102, 241, 0.2) !important; }
+.focus\:bg-\[\#0F172A\]\/60:focus { background-color: rgba(15, 23, 42, 0.6) !important; }
+.cursor-text { cursor: text !important; }
+
+/* Shadow utilities for premium look */
+.shadow-\[-12px_0_40px_-12px_rgba\(0\,0\,0\,0\.6\)\] {
+    box-shadow: -12px 0 40px -12px rgba(0, 0, 0, 0.6) !important;
+}
+

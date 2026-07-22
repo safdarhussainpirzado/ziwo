@@ -157,11 +157,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     newScript.appendChild(document.createTextNode(code));
                     // Append to body so global functions land on window
-                    document.body.appendChild(newScript);
-                    // Remove immediately — inline scripts execute synchronously on append
-                    document.body.removeChild(newScript);
+                    if (document.body) {
+                        document.body.appendChild(newScript);
+                        // Remove immediately — inline scripts execute synchronously on append
+                        document.body.removeChild(newScript);
+                    }
                 } catch (e) {
-                    console.error('Bento Bridge: Script Re-init Failed', e, oldScript);
+                    console.warn('Bento Bridge: Script re-init (non-fatal)', e && e.message ? e.message : e);
                 }
             });
 

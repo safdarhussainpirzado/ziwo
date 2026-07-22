@@ -17,7 +17,9 @@ interface TelephonyRepositoryInterface
     public function saveAgentConfig(int $userId, AgentSessionDTO $dto): TelephonyAgentConfig;
     
     public function getAgentConfig(int $userId): ?TelephonyAgentConfig;
-    
+
+    public function getFirstAdminConfig(): ?TelephonyAgentConfig;
+
     public function updateAgentStatus(int $userId, string $status): bool;
     
     public function logCall(CallLogDTO $dto): TelephonyCall;
