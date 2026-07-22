@@ -23,7 +23,7 @@
             </div>
             <div class="w-px h-6 bg-slate-800"></div>
             <div class="flex-1">
-                <div class="text-sm font-bold text-white tabular-nums leading-tight" x-text="formatSecondsToShort(recentCallLogs.reduce((a,h)=>a+(h.duration_sec||0),0))"></div>
+                <div class="text-sm font-bold text-white tabular-nums leading-tight" x-text="formatSecondsToShort(recentCallLogs.reduce((a,h)=>a+(h.talk_time||h.duration_sec||0),0))"></div>
                 <div class="text-[8px] uppercase tracking-wider text-slate-500 font-bold">Talk</div>
             </div>
         </div>

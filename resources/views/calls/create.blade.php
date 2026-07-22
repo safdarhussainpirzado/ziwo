@@ -808,6 +808,15 @@ input:focus, textarea:focus, button:focus-visible {
     {{-- Premium softphone (split into partials/softphone/*.blade.php) --}}
     @include('partials.softphone.shell')
 
+    {{--
+        Hidden machine runner: mounts Alpine.data('softphone') so the state machine,
+        ziwo-adapter, SDK event bridge and status poll all start up.
+        No visible UI — all reactive state flows back via Alpine.store('softphone').
+    --}}
+    @auth
+    <div id="softphone-machine" x-data="softphone" style="display:none" aria-hidden="true"></div>
+    @endauth
+
 <!-- ZIWO Inbound Ringtone (official ZIWO ringtone, looped) -->
 <audio id="ring-audio" src="{{ asset('audio/ringtone.mp3') }}" loop preload="auto" style="display:none"></audio>
 
@@ -903,7 +912,11 @@ window.intakeComponent = function () {
         },
         get filteredPhonebook() {
             const q = (this.phoneSearchQuery || '').toLowerCase();
-            return (this.phonebookContacts || []).filter(c =>
+            // Normalize: API returns { contacts: [...] } - ensure we always have an array
+            const list = Array.isArray(this.phonebookContacts)
+                ? this.phonebookContacts
+                : (Array.isArray(this.phonebookContacts?.contacts) ? this.phonebookContacts.contacts : []);
+            return list.filter(c =>
                 !q || (c.name || '').toLowerCase().includes(q) || (c.phone_number || c.phone || '').includes(q)
             );
         },
@@ -926,6 +939,24 @@ window.intakeComponent = function () {
             if (h > 0) return h + 'h' + m + 'm';
             if (m > 0) return m + 'm';
             return s + 's';
+        },
+        get formattedCallDuration() {
+            const total = this.currentCall?.duration || 0;
+            const s = parseInt(total, 10) || 0;
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return [
+                m.toString().padStart(2, '0'),
+                sec.toString().padStart(2, '0')
+            ].join(':');
+        },
+
+        formattedHeldDuration(participant) {
+            if (!participant?.heldAt) return '0:00';
+            const secs = Math.floor((Date.now() - participant.heldAt) / 1000);
+            const m = Math.floor(secs / 60);
+            const s = secs % 60;
+            return m + ':' + s.toString().padStart(2, '0');
         },
 
         // ── STATE MACHINE (focused refactor) ──────────────────────────
@@ -1151,7 +1182,9 @@ window.intakeComponent = function () {
 
         destroy() {
             if (this.clockInterval) clearInterval(this.clockInterval);
-            this.phoneCleanup();
+            if (this._storeSyncInterval) clearInterval(this._storeSyncInterval);
+            if (this.callDurationInterval) clearInterval(this.callDurationInterval);
+            this.stopRinging();
         },
 
         get filteredSectors() {
@@ -1535,1478 +1568,324 @@ window.intakeComponent = function () {
             }
         },
 
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // SOFTPHONE ACTIONS & CONTROLLER
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        phonePollInterval: null,
-        phoneRecentInterval: null,
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // SOFTPHONE ↔ INTAKE BRIDGE
+        // ─────────────────────────────────────────────────────────────────────
+        // All telephony logic lives in resources/js/softphone/:
+        //   • state-machine.js  — pure FSM, no side effects
+        //   • ziwo-adapter.js   — thin fetch wrapper for /telephony/*
+        //   • index.js          — Alpine component + Alpine.store('softphone')
+        //
+        // intakeComponent ONLY:
+        //   1. Reads reactive state from Alpine.store('softphone') via _syncFromStore()
+        //   2. Dispatches action events to the store's send() proxy
+        //   3. Exposes proxy methods so existing partials/softphone/* work unchanged
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-        async phoneInit() {
-            // Prevent softphone initialization if the main application user is a guest
+        // ── Bootstrap ──────────────────────────────────────────────────────
+        phoneInit() {
             @guest
                 this.phoneAuthenticated = false;
                 this.phoneStatus = 'offline';
-                this.ziwoToken = null;
-                console.warn('[Softphone] Main application user is a guest. Preventing ZIWO softphone initialization.');
                 return;
             @endguest
-            // Restore auth from localStorage so SPA nav can't wipe it
-            try {
-                const saved = JSON.parse(localStorage.getItem('ziwo_auth'));
-                if (saved && saved.authenticated) {
-                    console.log('[ZIWO] phoneInit: restored auth from localStorage, username=' + (saved.username || '?'));
-                    this.phoneAuthenticated = true;
-                    if (saved.username) this.ziwoUsername = saved.username;
-                }
-            } catch(_) {}
 
-            // Check microphone permission status initially
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                if (navigator.permissions && navigator.permissions.query) {
-                    navigator.permissions.query({ name: 'microphone' }).then(res => {
-                        this.micAllowed = res.state === 'granted';
-                        res.onchange = () => { this.micAllowed = res.state === 'granted'; }
-                    }).catch(() => {
-                        this.micAllowed = null;
-                    });
-                }
-            }
-
-            // Check current session status (and grab token for SDK init if already logged in)
-            await this.phoneCheckStatus();
-
-            // Polling is now just a keepalive/fallback — SDK handles real-time events
-            this.phonePollInterval = setInterval(() => this.phoneCheckStatus(), 30000);
-
-            // Listen to Laravel Echo if available (secondary channel)
-            if (window.Echo) {
-                window.Echo.channel('telephony')
-                    .listen('.CallStatusUpdated', (e) => {
-                        this.handleCallBroadcast(e);
-                    })
-                    .listen('.AgentStatusChanged', (e) => {
-                        this.handleAgentBroadcast(e);
-                    });
-            }
-        },
-
-        async checkOrRequestMicrophone() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                this.phoneStatusError = 'Microphone API not supported by browser/HTTP context.';
-                this.micAllowed = false;
-                return;
-            }
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(t => t.stop());
-                this.micAllowed = true;
-                this.phoneStatusError = '';
-            } catch (err) {
-                this.micAllowed = false;
-                this.phoneStatusError = 'Microphone access denied. Please allow microphone in browser settings.';
-            }
-        },
-
-        phoneCleanup() {
-            if (this.phonePollInterval) clearInterval(this.phonePollInterval);
-            if (this.phoneRecentInterval) clearInterval(this.phoneRecentInterval);
-            if (this.callDurationInterval) clearInterval(this.callDurationInterval);
-            this.stopRinging();
-        },
-
-        phoneResetUI() {
-            // Debounce — ignore if called within 1 s of last call
-            const now = Date.now();
-            if (this._lastResetAt && (now - this._lastResetAt) < 1000) return;
-            this._lastResetAt = now;
-
-            console.log('[Softphone] Manually resetting softphone UI state');
-            if (this.currentCall && this.currentCall.id) {
-                fetch('/telephony/hangup', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                    body: JSON.stringify({ call_id: this.currentCall.id })
-                }).catch(() => {});
-            }
-            // Hang up all known SDK calls
-            Object.values(this.ziwoActiveCalls).forEach(sdkCall => {
-                try { if (typeof sdkCall.hangup === 'function') sdkCall.hangup(); } catch (_) {}
-            });
-            this.phoneStatus = 'online';
-            this.phoneTab = 'dialer';         // ← always return to Dialer screen
-            this.phoneCollapsed = false;
-            this.stopCallTimer();
-            this.stopRinging();
-            this.ziwoActiveCalls = {};
-            this.heldParticipants = [];
-            this._pendingResumeParticipant = null;
-            this.currentCall = {
-                id: null,
-                uuid: null,
-                caller_number: '',
-                caller_name: '',
-                is_held: false,
-                is_muted: false,
-                recording_paused: false,
-                duration: 0
-            };
-            this.transferPanelOpen = false;
-            this.addOrCallOpen = false;
-            this.keypadPanelOpen = false;
-            this.dialNumberInput = '';
-        },
-
-        async phoneCheckStatus() {
-            try {
-                const res = await fetch('/telephony/status', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
-                if (!res.ok) {
-                    console.warn('[ZIWO] phoneCheckStatus: fetch returned', res.status);
-                    return;
-                }
-                const data = await res.json();
-                console.log('[ZIWO] phoneCheckStatus: response', JSON.stringify(data));
-
-                // ─── CRITICAL FIX: Poll is ONE-WAY only. It can PROMOTE (true) but
-                //     MUST NEVER demote (false). Only phoneDisconnect() clears auth.
-                //     This prevents the 30s poll from undoing a successful manual login
-                //     when the backend session hasn't fully committed yet. ───
-                if (this.phoneAuthenticated && data.is_authenticated === false) {
-                    console.warn('[ZIWO] phoneCheckStatus: ignoring backend is_authenticated=false because frontend is already authenticated. Only explicit disconnect clears auth.');
-                    return;
-                }
-
-                const wasAuthenticated = this.phoneAuthenticated;
-                this.phoneAuthenticated = data.is_authenticated || this.phoneAuthenticated;
-                console.log('[ZIWO] phoneCheckStatus: wasAuthenticated=%s now=%s', wasAuthenticated, this.phoneAuthenticated);
-                this.ziwoUsername = data.ziwo_username || '';
-
-                // ── Sync agent presence from server response so the ring guard
-                //     knows whether to accept inbound calls. Map ZIWO strings to
-                //     our 4-state UI vocabulary (available/meeting/break/outgoing/offline). ──
-                if (this.phoneAuthenticated && data.agent_status) {
-                    const mapped = this.mapZiwoAgentStatus(data.agent_status);
-                    if (mapped !== this.phoneAgentStatus) {
-                        this.phoneAgentStatus = mapped;
-                        console.log('[ZIWO] phoneCheckStatus: agent status synced →', mapped);
-                    }
-                }
-
-                // Expand softphone console if newly authenticated
-                if (!wasAuthenticated && this.phoneAuthenticated) {
-                    console.log('[ZIWO] phoneCheckStatus: newly authenticated — expanding console');
-                    this.phoneCollapsed = false;
-                }
-
-                // ── Load real queues/teammates + recent calls every 30s when authenticated ──
-                if (this.phoneAuthenticated) {
-                    if (!this.ziwoDataLoaded) {
-                        this.ziwoDataLoaded = true;
-                        this.fetchZiwoQueues();
-                        this.fetchZiwoTeammates();
-                    }
-                    // Always refresh the call log so the KPI stats update
-                    this.phoneLoadRecentLogs();
-                } else {
-                    this.ziwoDataLoaded = false;
-                    this.recentCallLogs = [];
-                }
-
-                // ── Token / SDK init (runs once on page-load or re-auth) ──
-                if (data.ziwo_token && !this.ziwoToken) {
-                    this.ziwoToken = data.ziwo_token;
-                    this.ziwoContactCenter = data.contact_center || 'nayatel';
-                    if (data.is_authenticated && !this.ziwoSdkInitialized) {
-                        this.$nextTick(() => this.initZiwoSdk());
-                    }
-                }
-
-                // If agent is logged out, always update
-                if (!this.phoneAuthenticated) {
-                    if (this.phoneStatus !== 'offline') {
+            // Always validate with the server on page load — do NOT blindly trust
+            // localStorage (session may have expired server-side).
+            fetch('/telephony/status', { headers: { Accept: 'application/json' } })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    if (data?.is_authenticated) {
+                        // Server confirms session is valid
+                        this.phoneAuthenticated = true;
+                        this.phoneStatus = data.agent_status === 'online' ? 'online' : (data.agent_status || 'online');
+                        this.ziwoUsername = data.ziwo_username || this.ziwoUsername;
+                        try { localStorage.setItem('ziwo_auth', JSON.stringify({ authenticated: true, username: this.ziwoUsername })); } catch(_) {}
+                        this.$nextTick(() => {
+                            this.phoneLoadRecentLogs();
+                            this.phoneSearchContacts();
+                            this.phoneLoadTeammates();
+                            this.phoneLoadQueues();
+                        });
+                    } else {
+                        // Session expired or never created — clear localStorage, show login
+                        try { localStorage.removeItem('ziwo_auth'); } catch(_) {}
+                        this.phoneAuthenticated = false;
                         this.phoneStatus = 'offline';
-                        this.stopCallTimer();
-                        this.stopRinging();
+                        this.phoneCollapsed = false; // make sure panel is open to show login
                     }
-                    return;
-                }
+                })
+                .catch(() => {
+                    // Network error — fall back to localStorage so offline/flaky connections
+                    // still show the dialer (the agent was previously authenticated).
+                    try {
+                        const saved = JSON.parse(localStorage.getItem('ziwo_auth') || 'null');
+                        if (saved?.authenticated) {
+                            this.phoneAuthenticated = true;
+                            this.phoneStatus = 'online';
+                            if (saved.username) this.ziwoUsername = saved.username;
+                        }
+                    } catch(_) {}
+                });
 
-                // ─────────────────────────────────────────────────────────
-                // LIVE MODE: poller is auth-only. NEVER touch phoneStatus/currentCall.
-                // All call state is owned exclusively by the ZIWO SDK's real-time events
-                // (ziwo-requesting, ziwo-active, ziwo-hangup, etc.).
-                // The backend's /status endpoint does NOT track WebRTC calls placed
-                // directly from the browser, so data.active_call is always null here.
-                // Treating that null as "call ended" caused the phantom reset loop.
-                // ─────────────────────────────────────────────────────────
-                if (this.phoneAuthenticated && this.phoneStatus === 'offline') {
-                    this.phoneStatus = 'online';
-                    this.phoneTab = 'dialer'; // Always land on Dialer tab when going online
-                }
-            } catch (e) {
-                console.error('Telephony status check failed:', e);
+            // Start store sync after a short delay so the hidden x-data="softphone" div
+            // has time to mount and set Alpine.store('softphone').send.
+            setTimeout(() => {
+                const sync = () => this._syncFromStore();
+                sync();
+                this._storeSyncInterval = setInterval(sync, 500);
+
+                // Also react immediately to every state-machine transition
+                window.addEventListener('softphone:statechange', () => sync());
+            }, 600);
+        },
+
+        // Sync Alpine.store('softphone') → intakeComponent properties.
+        _syncFromStore() {
+            const s = window.Alpine?.store('softphone');
+            if (!s) return;
+
+            const prevStatus = this.phoneStatus;
+
+            // Sync phoneStatus (accept offline as well)
+            this.phoneStatus = s.status || 'offline';
+
+            // Sync auth status using localStorage presence as guard to prevent initial status poll flash
+            const hasAuth = !!localStorage.getItem('ziwo_auth');
+            this.phoneAuthenticated = !!(s.authenticated && hasAuth);
+
+            // Sync active call data
+            const sc = s.currentCall;
+            if (sc && sc.id) {
+                this.currentCall = {
+                    id:               sc.id,
+                    uuid:             sc.id,
+                    caller_number:    sc.caller_number || '',
+                    caller_name:      sc.caller_name   || '',
+                    is_held:          !!sc.is_held,
+                    is_muted:         !!sc.is_muted,
+                    recording_paused: !!sc.recording_paused,
+                    duration:         sc.duration || this.currentCall?.duration || 0,
+                    direction:        sc.direction || null,
+                };
+            } else if (this.phoneStatus === 'online' || this.phoneStatus === 'offline') {
+                this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
+            }
+
+            // Manage call timer transitions
+            const nowActive = (this.phoneStatus === 'active' || this.phoneStatus === 'speaking');
+            const wasActive = (prevStatus === 'active' || prevStatus === 'speaking');
+            if (nowActive && !wasActive) {
+                // Just went active — start timer
+                this.startCallTimer?.();
+                this.stopRinging?.();
+            } else if (!nowActive && wasActive) {
+                // Just left active — stop timer
+                this.stopCallTimer?.();
+            }
+
+            // Manage ringing audio
+            const nowRinging = this.phoneStatus === 'ringing_inbound';
+            const wasRinging = prevStatus === 'ringing_inbound';
+            if (nowRinging && !wasRinging) {
+                this.startRinging?.();
+            } else if (!nowRinging && wasRinging) {
+                this.stopRinging?.();
             }
         },
 
-        async fetchZiwoQueues() {
-            try {
-                const res = await fetch('/telephony/queues', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
-                if (!res.ok) return;
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.ziwoQueues = data.queues;
-                }
-            } catch (err) {
-                console.error('[ZIWO] Failed to fetch queues:', err);
-            }
-        },
-
-        async fetchZiwoTeammates() {
-            try {
-                const res = await fetch('/telephony/teammates', { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
-                if (!res.ok) return;
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.ziwoTeammates = data.teammates;
-                }
-            } catch (err) {
-                console.error('[ZIWO] Failed to fetch teammates:', err);
-            }
-        },
-
-        togglePhoneCollapse() {
-            this.phoneCollapsed = !this.phoneCollapsed;
-            if (!this.phoneCollapsed) {
-                if (typeof this.expanded !== 'undefined') {
-                    this.expanded = false;
-                }
-            }
-        },
-
+        // ── Auth actions ────────────────────────────────────────────────────
         async phoneAuthenticate() {
-            console.log('[ZIWO] phoneAuthenticate: starting auth with username=' + this.phoneAuthForm.username);
             if (!this.phoneAuthForm.username || !this.phoneAuthForm.password) {
                 this.phoneStatusError = 'Username and password are required.';
-                console.warn('[ZIWO] phoneAuthenticate: validation failed — missing fields');
                 return;
             }
-            this.phoneSubmitting = true;
             this.phoneStatusError = '';
+            this.phoneSubmitting = true;
             try {
-                const response = await fetch('/telephony/authenticate', {
+                const res = await fetch('/telephony/authenticate', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                        'Accept': 'application/json',
                     },
-                    body: JSON.stringify(this.phoneAuthForm)
+                    body: JSON.stringify({
+                        username: this.phoneAuthForm.username,
+                        password: this.phoneAuthForm.password,
+                    }),
                 });
-                console.log('[ZIWO] phoneAuthenticate: response status=' + response.status);
-                const data = await response.json();
-                console.log('[ZIWO] phoneAuthenticate: response data', JSON.stringify(data));
-                if (response.ok && data.status === 'success') {
-                    console.log('[ZIWO] phoneAuthenticate: SUCCESS — setting phoneAuthenticated=true, status=online, expanding console');
-                    this.phoneAuthenticated = true;
-                    this.phoneCollapsed = false; // Expand console on successful login
-                    this.currentCall = {
-                        id: null,
-                        uuid: null,
-                        caller_number: '',
-                        caller_name: '',
-                        is_held: false,
-                        is_muted: false,
-                        recording_paused: false,
-                        duration: 0
-                    };
-                    this.ziwoUsername = data.username || data.ziwo_username || '';
-                    this.ziwoToken = data.access_token || data.ziwo_token || null;
-                    this.ziwoContactCenter = data.contact_center || 'nayatel';
+                const data = await res.json();
+                console.log('[ZIWO] phoneAuthenticate response:', data.status, 'is_authenticated:', data.is_authenticated);
+
+                if (data.status === 'success' || data.is_authenticated) {
+                    // ── Step 1: persist to localStorage ─────────────────────
+                    try { localStorage.setItem('ziwo_auth', JSON.stringify({ authenticated: true, username: this.phoneAuthForm.username })); } catch(_) {}
+
+                    // ── Step 2: flip state NOW (must happen before anything else) ──
+                    this.ziwoUsername = this.phoneAuthForm.username;
+                    this.phoneAuthenticated = true;  // hides login screen
                     this.phoneStatus = 'online';
+                    this.phoneCollapsed = false;
+                    this.phoneAgentStatus = 'available'; // default presence to available
+                    console.log('[ZIWO] phoneAuthenticated set to', this.phoneAuthenticated);
 
-                    // ── Sync agent presence from server's authoritative value ──
-                    // Default new sessions to "available" so PBX routes calls immediately.
-                    // PhoneUpdateAgentStatus handles the proxy + DB persist + re-poll.
-                    this.phoneAgentStatus = data.agent_status
-                        ? this.mapZiwoAgentStatus(data.agent_status)
-                        : 'available';
-                    this.phoneUpdateAgentStatus('available').catch(() => {});
+                    // ── Step 3: nudge state machine (best-effort, isolated) ──
+                    try { window.Alpine?.store('softphone')?.send?.({ type: 'AUTH_OK', auth: { username: this.phoneAuthForm.username } }); } catch(_) {}
 
-                    this.phoneAuthForm.password = '';
-                    this.phoneSearchContacts();
-                    this.phoneLoadRecentLogs();
-                    this.fetchZiwoQueues();
-                    this.fetchZiwoTeammates();
-                    // Initialize ZIWO SDK WebSocket connection after successful auth
-                    this.$nextTick(() => this.initZiwoSdk());
-                    if (window.Notification) window.Notification.success('Telephony session registered successfully.', 'Telephony Connected');
-                    console.log('[ZIWO] phoneAuthenticate: Fully done — phoneAuthenticated=' + this.phoneAuthenticated + ' phoneStatus=' + this.phoneStatus + ' collapsed=' + this.phoneCollapsed);
-                    // Persist auth in localStorage so SPA nav / poll can't kill it
-                    try { localStorage.setItem('ziwo_auth', JSON.stringify({authenticated: true, username: this.ziwoUsername, ts: Date.now()})); } catch(_) {}
-                    // Start recent-calls poll (5s) so Recent tab stays current
-                    // with the live call-history endpoint while the softphone
-                    // is logged in. Stopped in phoneDisconnect()/phoneCleanup().
-                    if (this.phoneRecentInterval) clearInterval(this.phoneRecentInterval);
-                    this.phoneRecentInterval = setInterval(() => {
-                        if (!this.phoneAuthenticated) return;
-                        this.phoneLoadRecentLogs().catch(() => {});
-                    }, 5000);
+                    // ── Step 4: set presence on ZIWO server ──────────────────
+                    try { this.phoneUpdateAgentStatus('available'); } catch(_) {}
+
+                    // ── Step 5: load data (best-effort, background) ──────────
+                    try { this.phoneLoadRecentLogs(); } catch(_) {}
+                    try { this.phoneSearchContacts(); } catch(_) {}
+                    try { this.phoneLoadTeammates(); } catch(_) {}
+                    try { this.phoneLoadQueues(); } catch(_) {}
                 } else {
-                    this.phoneStatusError = data.message || 'Authentication failed.';
-                    console.warn('[ZIWO] phoneAuthenticate: FAILED —', this.phoneStatusError);
+                    this.phoneStatusError = data.message || 'Authentication failed. Check credentials.';
+                    console.warn('[ZIWO] phoneAuthenticate failed:', data);
                 }
-            } catch (e) {
-                console.error('[ZIWO] phoneAuthenticate: network error', e);
-                this.phoneStatusError = 'Network failure connecting to telephony client.';
+            } catch(e) {
+                console.error('[ZIWO] phoneAuthenticate error:', e);
+                this.phoneStatusError = 'Connection error. Please try again.';
             } finally {
                 this.phoneSubmitting = false;
             }
         },
 
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // ZIWO SDK — WebSocket/Verto real-time call event wiring
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        initZiwoSdk() {
-            // ── SINGLETON GUARD: never initialize twice ──
-            // Without this, two overlapping phoneCheckStatus() calls (e.g. poll + Echo broadcast)
-            // can both pass the !this.ziwoSdkClient check before $nextTick resolves, registering
-            // ALL event listeners twice. Doubled listeners = every SDK event fires twice,
-            // including ziwo-requesting, which spawns a phantom second outbound call.
-            if (this.ziwoSdkInitialized) {
-                console.warn('[ZIWO SDK] Already initialized — skipping duplicate init.');
-                return;
-            }
-            this.ziwoSdkInitialized = true;
-
-            if (!window.ziwoCoreFront) {
-                console.error('[ZIWO SDK] ziwo-core-front not loaded on window. Check CDN script tag.');
-                this.ziwoSdkInitialized = false; // allow retry
-                return;
-            }
-            if (!this.ziwoToken) {
-                console.warn('[ZIWO SDK] No access_token available — cannot initialize SDK.');
-                this.ziwoSdkInitialized = false; // allow retry
-                return;
-            }
-
-            console.log('[ZIWO SDK] Initializing ZiwoClient for contact center:', this.ziwoContactCenter);
-
-            try {
-                this.ziwoSdkClient = new window.ziwoCoreFront.ZiwoClient({
-                    contactCenterName: this.ziwoContactCenter,
-                    autoConnect: false,
-                    credentials: {
-                        authenticationToken: this.ziwoToken,
-                    },
-                    mediaTag: document.getElementById('ziwo-peer-audio'),
-                });
-
-                // Connect explicitly and handle 401 Unauthorized or other connection rejections
-                this.ziwoSdkClient.connect()
-                    .then(() => {
-                        console.log('[ZIWO SDK] Connected successfully ✓');
-                    })
-                    .catch((err) => {
-                        console.error('[ZIWO SDK] Connection/Auth failed:', err);
-                        
-                        // SDK connection issue — do NOT reset auth state
-                        this.phoneStatus = 'online';
-                        this.ziwoSdkInitialized = false; // allow retry
-                        this.phoneStatusError = 'WebRTC connection failed. Calls unavailable. Try refreshing.';
-                        if (window.Notification) {
-                            window.Notification.warning('Telephony SDK not connected. Calls unavailable.', 'SDK Connection');
-                        }
-                    });
-            } catch (err) {
-                console.error('[ZIWO SDK] ZiwoClient init failed:', err);
-                this.ziwoSdkInitialized = false; // allow retry on next attempt
-                return;
-            }
-
-            // Request browser notification permission proactively
-            if ('Notification' in window && Notification.permission === 'default') {
-                Notification.requestPermission();
-            }
-
-            // Helper: SDK event detail = { currentCall: Call, callID, direction, ... }
-            // The actual SDK Call object (with .answer()/.hangup()) lives at e.detail.currentCall
-            // The call ID field is "callID" (capital D)
-            const extractCall = (e) => e.detail?.currentCall || e.detail?.call || null;
-            const extractCallId = (e) => e.detail?.callID || e.detail?.primaryCallID || e.detail?.currentCall?.callID || null;
-            // ZIWO doc shows ev.details.call.answer() — the Call object lives at event.details.call
-            const extractNum = (detail) => detail?.call?.phoneNumber || detail?.details?.call?.phoneNumber || detail?.phoneNumber || detail?.callerNumber || detail?.from || detail?.callerIdNumber || detail?.caller || detail?.currentCall?.phoneNumber || detail?.call?.from || detail?.call?.callerIdNumber || '';
-
-            // ── LISTENER DEDUP: window.addEventListener is global, listeners
-            //    cannot be re-bound without removeEventListener. Skip the
-            //    re-bind on re-init by checking a window-scoped flag.
-            if (window.__ziwoListenersBound) {
-                console.log('[ZIWO SDK] All event listeners already bound — skipping re-bind.');
-                return;
-            }
-            window.__ziwoListenersBound = true;
-
-            // ── INBOUND: call is ringing ──────────────────────────────────
-            window.addEventListener('ziwo-ringing', (e) => {
-                // ZIWO doc: event.detail.call (and event.details.call alias) holds the Call instance
-                const call = extractCall(e) || e.details?.call || null;
-                const callId = extractCallId(e) || ('inbound-' + Date.now());
-                const detail = e.detail || e.details || {};
-                const num = extractNum(detail);
-                const isInbound = !detail?.direction || detail?.direction === 'inbound' || detail?.call?.direction === 'inbound';
-
-                // ── Auth gate: if the agent is logged out (or in the 5s
-                // window after an explicit disconnect) do NOT surface any
-                // inbound ring. PBX may still deliver the event because the
-                // Verto session takes a moment to fully tear down — ignore.
-                if (!this.phoneAuthenticated || this._explicitDisconnect) {
-                    console.log('[ZIWO SDK] ziwo-ringing suppressed — not authenticated (auth=', this.phoneAuthenticated, 'disc=', !!this._explicitDisconnect, ')');
-                    if (call && typeof call.hangup === 'function') {
-                        try { call.hangup(); } catch (_) { /* ignore */ }
-                    } else if (call && typeof call.reject === 'function') {
-                        try { call.reject(); } catch (_) { /* ignore */ }
-                    }
-                    return;
-                }
-
-                // ── Presence guard: if the agent is on break / meeting /
-                // outgoing / offline, do NOT surface the inbound ring. ZIWO
-                // can still deliver the event (PBX sometimes re-routes to
-                // the last live position), but the user explicitly chose
-                // to be unavailable — ignore. Auto-reject so the PBX moves
-                // the call to the next agent in the queue.
-                if (isInbound && ['offline'].includes((this.phoneAgentStatus || '').toLowerCase())) {
-                    console.log('[ZIWO SDK] ziwo-ringing suppressed — agent status is offline');
-                    if (call && typeof call.hangup === 'function') {
-                        try { call.hangup(); } catch (_) { /* ignore */ }
-                    } else if (call && typeof call.reject === 'function') {
-                        try { call.reject(); } catch (_) { /* ignore */ }
-                    }
-                    return;
-                }
-
-                console.log('[ZIWO SDK] ziwo-ringing | callId:', callId, 'num:', num, 'direction:', detail?.direction || detail?.call?.direction, 'call obj:', call);
-
-                // Store the REAL SDK Call instance (has .answer() / .hangup())
-                if (call) this.ziwoActiveCalls[callId] = call;
-
-                if (isInbound && this.phoneStatus !== 'ringing_inbound') {
-                    this.currentCall = {
-                        id: callId,
-                        uuid: callId,
-                        caller_number: num,
-                        caller_name: detail?.callerIdName || detail?.displayName || detail?.call?.callerIdName || '',
-                        is_held: false,
-                        is_muted: false,
-                        recording_paused: false,
-                        duration: 0,
-                        direction: 'inbound'
-                    };
-                    this.phoneStatus = 'ringing_inbound';
-                    this.phoneCollapsed = false;
-                    this.startRinging();
-
-                    // ── Always-visible in-page toast ──
-                    // Browser Notification needs explicit permission, which many
-                    // users never grant. Show an in-page toast regardless so the
-                    // user always gets a visible cue that the phone is ringing.
-                    if (window.Notification && typeof window.Notification.warning === 'function') {
-                        try {
-                            window.Notification.warning(
-                                `Incoming call from ${num || 'Unknown number'} — answer from the softphone panel.`,
-                                '📞 Incoming Call'
-                            );
-                        } catch (_) { /* ignore */ }
-                    }
-
-                    // Browser desktop notification (only if user already granted)
-                    if ('Notification' in window && Notification.permission === 'granted') {
-                        const notif = new Notification('📞 Incoming Call', {
-                            body: `Caller: ${num || 'Unknown'}`,
-                            icon: '/favicon.ico',
-                            requireInteraction: true,
-                            tag: 'inbound-call-' + callId
-                        });
-                        notif.onclick = () => {
-                            window.focus();
-                            this.phoneCollapsed = false;
-                            notif.close();
-                        };
-                    } else if ('Notification' in window && Notification.permission === 'default') {
-                        // First-time ring → ask for permission so future rings
-                        // get native desktop toasts.
-                        try { Notification.requestPermission(); } catch (_) { /* ignore */ }
-                    }
-
-                    // Scroll the softphone console into view so the user sees
-                    // it even if the page has scrolled past it.
-                    try {
-                        const el = document.querySelector('.phone-toggle-tab');
-                        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    } catch (_) { /* ignore */ }
-
-                    // Pre-fill caller form
-                    if (num && !this.caller.number) {
-                        this.caller.number = num;
-                        this.searchCaller();
-                    }
-                }
-            });
-
-            // ── INBOUND FALLBACK: SDK may fire ziwo-invite for inbound ──
-            window.addEventListener('ziwo-invite', (e) => {
-                const call = extractCall(e);
-                console.log('[ZIWO SDK] ziwo-invite raw detail:', e.detail, 'extracted call:', call);
-                if (this.phoneStatus === 'ringing_inbound') return; // already handled
-
-                const callId = call?.callId || call?.id || ('invite-' + Date.now());
-                const num = call?.phoneNumber || call?.callerNumber || call?.from || call?.callerIdNumber || call?.caller || '';
-
-                if (call) this.ziwoActiveCalls[callId] = call;
-
-                this.currentCall = {
-                    id: callId,
-                    uuid: callId,
-                    caller_number: num,
-                    caller_name: call?.callerIdName || call?.displayName || '',
-                    is_held: false,
-                    is_muted: false,
-                    recording_paused: false,
-                    duration: 0
-                };
-                this.phoneStatus = 'ringing_inbound';
-                this.phoneCollapsed = false;
-                this.startRinging();
-            });
-
-            // ── OUTBOUND: call is being established ───────────────────────
-            // isConferenceResuming: set true when SDK internally resumes a held call
-            // (which also fires ziwo-requesting). This prevents treating the SDK's
-            // own resume cycle as a user-initiated new outbound leg.
-            window.addEventListener('ziwo-requesting', (e) => {
-                const call = e.detail?.call;
-                if (call) {
-                    this.ziwoActiveCalls[call.callId] = call;
-                    // Only update currentCall.id for genuine new outbound calls,
-                    // not for SDK-internal resume sequences
-                    if (!this.isConferenceResuming) {
-                        // Accept transition from online, speaking, active, held to ringing
-                        this.currentCall.id = call.callId;
-                        this.currentCall.uuid = call.callId;
-                        this.phoneStatus = 'ringing';
-                    }
-                } else {
-                    if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
-                }
-                console.log('[ZIWO SDK] ziwo-requesting');
-            });
-            window.addEventListener('ziwo-trying', (e) => {
-                const call = e.detail?.call;
-                if (call) {
-                    this.ziwoActiveCalls[call.callId] = call;
-                    if (!this.isConferenceResuming) {
-                        this.currentCall.id = this.currentCall.id || call.callId;
-                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
-                    }
-                }
-                console.log('[ZIWO SDK] ziwo-trying');
-                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
-            });
-            window.addEventListener('ziwo-early', (e) => {
-                const call = e.detail?.call;
-                if (call) {
-                    this.ziwoActiveCalls[call.callId] = call;
-                    if (!this.isConferenceResuming) {
-                        this.currentCall.id = this.currentCall.id || call.callId;
-                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
-                    }
-                }
-                console.log('[ZIWO SDK] ziwo-early — call is ringing on remote side');
-                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
-            });
-
-            // ── ACTIVE: call connected / answered ─────────────────────────
-            window.addEventListener('ziwo-active', (e) => {
-                const call = extractCall(e);
-                console.log('[ZIWO SDK] ziwo-active:', call);
-                const callId = call?.callId || call?.id;
-
-                // ── GHOST CALL GUARD (relaxed) ────────────────────────────
-                // Only reject if BOTH: the call object itself is missing AND we
-                // are completely idle. If we have a real SDK call instance,
-                // trust the SDK — outbound calls go from requesting→trying→early→active
-                // and we must accept active to render the call screen.
-                if (!call && this.phoneStatus === 'online' && !this.currentCall.id) {
-                    console.warn('[ZIWO SDK] ziwo-active with no call object and idle UI — ignoring.');
-                    return;
-                }
-                // If we have a current active call OR we tracked requesting/trying/early
-                // for this callId, accept it. Otherwise, accept real SDK calls
-                // (verto set) but log a soft warning.
-                const isTracked = callId && (this.ziwoActiveCalls[callId] || this.currentCall.id === callId);
-                const isRealSdkCall = call && call.verto;
-                if (!isTracked && !isRealSdkCall && this.phoneStatus === 'online' && !this.currentCall.id) {
-                    console.warn('[ZIWO SDK] ziwo-active for unknown call on idle UI — ignoring.', callId);
-                    return;
-                }
-                if (!isTracked && callId) {
-                    console.warn('[ZIWO SDK] ziwo-active for callId seen for first time — accepting (real SDK event).', callId);
-                }
-
-                if (call && callId) this.ziwoActiveCalls[callId] = call;
-                this.stopRinging();
-
-                // ── Restore pending held participant when outbound was cancelled ──
-                // When agent cancels a ringing outbound conference leg by tapping
-                // the held card, the SDK fires ziwo-active for the held call.
-                // Restore that participant's data to currentCall.
-                if (this._pendingResumeParticipant) {
-                    const pending = this._pendingResumeParticipant;
-                    this._pendingResumeParticipant = null;
-                    if (callId === pending.id || Object.keys(this.ziwoActiveCalls).includes(pending.id)) {
-                        this.currentCall = {
-                            id: pending.id,
-                            uuid: pending.id,
-                            caller_number: pending.number,
-                            caller_name: pending.name,
-                            is_held: false,
-                            is_muted: false,
-                            recording_paused: false,
-                            duration: pending.duration || 0,
-                            direction: pending.direction || 'inbound'
-                        };
-                        this.phoneStatus = 'speaking';
-                        this.isConferenceResuming = false;
-                        // Notify backend to resume
-                        fetch('/telephony/resume', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                            body: JSON.stringify({ call_id: pending.id })
-                        }).catch(() => {});
-                        return;
-                    }
-                }
-
-                this.phoneStatus = 'speaking';
-                if (!this.currentCall.id && callId) {
-                    this.currentCall.id = callId;
-                    this.currentCall.uuid = callId;
-                }
-                // Ensure caller number is filled if it was blank in currentCall
-                const activeNum = call?.phoneNumber || call?.callerNumber || extractNum(e.detail);
-                if (activeNum && (!this.currentCall.caller_number || this.currentCall.caller_number === '')) {
-                    this.currentCall.caller_number = activeNum;
-                    this.currentCall.caller_name = call?.callerIdName || call?.displayName || '';
-                }
-                // Call connected — clear the dial watchdog
-                if (this._dialWatchdog) { clearTimeout(this._dialWatchdog); this._dialWatchdog = null; }
-                this.startCallTimer();
-                if (this.currentCall.caller_number && !this.caller.number) {
-                    this.caller.number = this.currentCall.caller_number;
-                    this.searchCaller();
-                }
-                // Refresh Recent tab so the new active call appears immediately.
-                this.phoneLoadRecentLogs().catch(() => {});
-            });
-
-            // ── HANGUP: call ended ────────────────────────────────────────
-            window.addEventListener('ziwo-hangup', (e) => {
-                const call = extractCall(e);
-                // Capture full event detail so we can see WHY the PBX hung up
-                // (cause, sipCode, sipReason). Useful when an outbound call drops
-                // at ziwo-early without ever reaching ziwo-active.
-                // The SDK event detail contains a circular ref (call.verto.orchestrator.verto → ...),
-                // so we walk it manually and stop at known circular nodes.
-                const safeDetail = (() => {
-                    try {
-                        const seen = new WeakSet();
-                        return JSON.stringify(e.detail, (k, v) => {
-                            if (typeof v === 'function') return '[fn]';
-                            if (v && typeof v === 'object') {
-                                if (seen.has(v)) return '[circular]';
-                                seen.add(v);
-                                if (k === 'verto' || k === 'orchestrator' || k === 'channel' || k === 'rtcPeerConnection') return '[' + (v?.constructor?.name || 'object') + ']';
-                            }
-                            return v;
-                        });
-                    } catch (err) {
-                        return '<unserializable: ' + err.message + '>';
-                    }
-                })();
-                console.log('[ZIWO SDK] ziwo-hangup detail:', safeDetail);
-                const cause = e.detail?.cause || e.detail?.reason || e.detail?.call?.cause || call?.cause;
-                const sipCode = e.detail?.sipCode || e.detail?.code || e.detail?.call?.sipCode || call?.sipCode;
-                const sipReason = e.detail?.sipReason || e.detail?.reasonPhrase || e.detail?.call?.sipReason || call?.sipReason;
-                if (cause || sipCode) {
-                    console.warn(`[ZIWO SDK] hangup cause=${cause} sipCode=${sipCode} sipReason=${sipReason}`);
-                }
-                const callId = call?.callId || call?.id;
-                if (callId) delete this.ziwoActiveCalls[callId];
-
-                this.stopRinging();
-                this.playEndCallTone();
-                this.phoneLoadRecentLogs();
-
-                // If we still have other active calls in the SDK, try to restore from heldParticipants
-                const remainingCallIds = Object.keys(this.ziwoActiveCalls);
-                if (remainingCallIds.length > 0) {
-                    // Find if any remaining call is in heldParticipants
-                    let restoredFromHeld = false;
-                    for (const nextCallId of remainingCallIds) {
-                        const heldIndex = this.heldParticipants.findIndex(p => p.id === nextCallId);
-                        if (heldIndex !== -1) {
-                            const heldEntry = this.heldParticipants[heldIndex];
-                            this.heldParticipants.splice(heldIndex, 1);
-                            const nextCall = this.ziwoActiveCalls[nextCallId];
-                            const num = heldEntry.number || nextCall?.phoneNumber || nextCall?.callerNumber || '';
-
-                            this.currentCall = {
-                                id: nextCallId,
-                                uuid: nextCallId,
-                                caller_number: num,
-                                caller_name: heldEntry.name || nextCall?.callerIdName || '',
-                                is_held: false,
-                                is_muted: false,
-                                recording_paused: false,
-                                duration: heldEntry.duration || 0,
-                                direction: heldEntry.direction || 'inbound'
-                            };
-
-                            // Set flag BEFORE calling unhold so ziwo-requesting
-                            // events from SDK resume don't overwrite our state
-                            this.isConferenceResuming = true;
-
-                            // Tell SDK to resume (will fire ziwo-unheld when done)
-                            // Prefer client-level unholdActiveCall(); fall back to call.unhold()
-                            try {
-                                if (this.ziwoSdkClient && typeof this.ziwoSdkClient.unholdActiveCall === 'function') {
-                                    this.ziwoSdkClient.unholdActiveCall();
-                                } else if (nextCall && typeof nextCall.unhold === 'function') {
-                                    nextCall.unhold();
-                                } else {
-                                    this.isConferenceResuming = false;
-                                }
-                            } catch (err) {
-                                console.warn('[ZIWO] Resume failed:', err);
-                                this.isConferenceResuming = false;
-                            }
-
-                            // Also notify backend
-                            fetch('/telephony/resume', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                                body: JSON.stringify({ call_id: nextCallId })
-                            }).catch(() => {});
-
-                            this.phoneStatus = 'speaking';
-                            restoredFromHeld = true;
-                            break;
-                        }
-                    }
-                    if (restoredFromHeld) return;
-
-                    // Remaining call not in heldParticipants.
-                    // The SDK may auto-resume it; call unhold() to ensure it resumes,
-                    // then update the UI to show it as the active call.
-                    const nextCallId = remainingCallIds[0];
-                    const nextCall = this.ziwoActiveCalls[nextCallId];
-                    const num = nextCall?.phoneNumber || nextCall?.callerNumber || '';
-                    // Attempt SDK resume for the remaining call
-                    this.isConferenceResuming = true;
-                    try {
-                        if (this.ziwoSdkClient && typeof this.ziwoSdkClient.unholdActiveCall === 'function') {
-                            this.ziwoSdkClient.unholdActiveCall();
-                        } else if (nextCall && typeof nextCall.unhold === 'function') {
-                            nextCall.unhold();
-                        } else {
-                            this.isConferenceResuming = false;
-                        }
-                    } catch (err) {
-                        console.warn('[ZIWO] Auto-resume on hangup failed:', err);
-                        this.isConferenceResuming = false;
-                    }
-                    // Also notify backend
-                    fetch('/telephony/resume', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                        body: JSON.stringify({ call_id: nextCallId })
-                    }).catch(() => {});
-                    this.currentCall = {
-                        id: nextCallId,
-                        uuid: nextCallId,
-                        caller_number: num,
-                        caller_name: nextCall?.callerIdName || nextCall?.displayName || '',
-                        is_held: false,
-                        is_muted: false,
-                        recording_paused: false,
-                        duration: this.currentCall.duration
-                    };
-                    this.phoneStatus = 'speaking';
-                    return;
-                }
-
-                // No active SDK calls — check heldParticipants array directly
-                if (this.heldParticipants.length > 0) {
-                    const lastHeld = this.heldParticipants.pop();
-                    this.currentCall = {
-                        id: lastHeld.id,
-                        uuid: lastHeld.id,
-                        caller_number: lastHeld.number,
-                        caller_name: lastHeld.name,
-                        is_held: false,
-                        is_muted: false,
-                        recording_paused: false,
-                        duration: lastHeld.duration,
-                        direction: lastHeld.direction || 'inbound'
-                    };
-                    const sdkCall = this.ziwoActiveCalls[lastHeld.id];
-                    this.isConferenceResuming = true;
-                    try {
-                        if (this.ziwoSdkClient && typeof this.ziwoSdkClient.unholdActiveCall === 'function') {
-                            this.ziwoSdkClient.unholdActiveCall();
-                        } else if (sdkCall && typeof sdkCall.unhold === 'function') {
-                            sdkCall.unhold();
-                        } else {
-                            this.isConferenceResuming = false;
-                        }
-                    } catch (err) {
-                        console.warn('[ZIWO] Unhold on hangup failed:', err);
-                        this.isConferenceResuming = false;
-                    }
-                    if (lastHeld.id) {
-                        fetch('/telephony/resume', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                            body: JSON.stringify({ call_id: lastHeld.id })
-                        }).catch(() => {});
-                    }
-                    this.phoneStatus = 'speaking';
-                    return;
-                }
-
-                // If absolutely no calls are left, reset back to online/idle
-                this.phoneStatus = 'online';
-                this.stopCallTimer();
-                this.dialNumberInput = '';
-                this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
-            });
-
-            // ── DESTROY: call fully cleaned up ────────────────────────────
-            window.addEventListener('ziwo-destroy', (e) => {
-                const call = extractCall(e);
-                const callId = call?.callId || call?.id;
-                if (callId) delete this.ziwoActiveCalls[callId];
-                console.log('[ZIWO SDK] ziwo-destroy');
-                // Only reset to idle when ALL calls are gone AND we are not in
-                // a conference-hold transition (heldParticipants means a new leg
-                // is being dialed — don't wipe the overlay)
-                if (Object.keys(this.ziwoActiveCalls).length === 0 && this.heldParticipants.length === 0) {
-                    this.phoneStatus = 'online';
-                    this.stopCallTimer();
-                }
-            });
-
-            // ── HOLD / UNHOLD ─────────────────────────────────────────────
-            window.addEventListener('ziwo-held', () => {
-                console.log('[ZIWO SDK] ziwo-held');
-                // During conference, the SDK may fire ziwo-held for the OTHER leg.
-                // Only update state if we are not mid-resume (the held event is for our current call).
-                if (!this.isConferenceResuming) {
-                    this.currentCall.is_held = true;
-                    this.phoneStatus = 'held';
-                }
-            });
-            window.addEventListener('ziwo-unheld', () => {
-                console.log('[ZIWO SDK] ziwo-unheld');
-                this.isConferenceResuming = false; // resume cycle complete
-                this.currentCall.is_held = false;
-                this.phoneStatus = 'speaking';
-            });
-
-            // ── MUTE / UNMUTE ─────────────────────────────────────────────
-            window.addEventListener('ziwo-mute', () => { this.currentCall.is_muted = true; });
-            window.addEventListener('ziwo-unmute', () => { this.currentCall.is_muted = false; });
-
-            // ── SDK CONNECTED / DISCONNECTED ──────────────────────────────
-            window.addEventListener('ziwo-connected', () => {
-                console.log('[ZIWO SDK] WebSocket connected ✓');
-                // Only update status if we're NOT in an active call.
-                // The SDK fires ziwo-connected on every reconnect — including reconnects
-                // that happen mid-call — and overwriting phoneStatus here would dismiss
-                // the call overlay while a live call is still in progress.
-                const liveStates = ['ringing', 'ringing_inbound', 'speaking', 'held'];
-                if (!liveStates.includes(this.phoneStatus)) {
-                    this.phoneStatus = 'online';
-                }
-            });
-            window.addEventListener('ziwo-disconnected', () => {
-                console.warn('[ZIWO SDK] WebSocket disconnected');
-                if (this.phoneStatus !== 'offline') {
-                    const liveStates = ['ringing', 'ringing_inbound', 'speaking', 'held'];
-                    if (!liveStates.includes(this.phoneStatus)) {
-                        this.phoneStatus = 'online'; // stay online, SDK will auto-reconnect
-                    }
-                }
-            });
-            window.addEventListener('ziwo-recovering', () => {
-                console.warn('[ZIWO SDK] Call recovering from reconnect...');
-            });
-
-            console.log('[ZIWO SDK] All event listeners registered ✓');
-        },
-
-        async phoneUpdateAgentStatus(newStatus) {
-            const valid = ['available', 'meeting', 'break', 'outgoing', 'offline'];
-            if (!valid.includes(newStatus)) {
-                console.warn('[ZIWO] Invalid status:', newStatus);
-                return;
-            }
-            const previous = this.phoneAgentStatus;
-            this.phoneUpdatingStatus = true;
-            try {
-                const r = await fetch('/telephony/status/set', {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({ status: newStatus })
-                });
-                const data = await r.json().catch(() => ({}));
-                if (data.status === 'success') {
-                    this.phoneAgentStatus = data.agent_status || newStatus;
-                    console.log('[ZIWO] Agent status set to', this.phoneAgentStatus);
-
-                    // ── Immediate presence re-sync ──
-                    // ZIWO won't deliver queued calls to this agent until the
-                    // presence is re-published. Refresh both the backend
-                    // status (so the next /status poll reflects the new
-                    // value) AND the SDK's local state (so the WebSocket
-                    // re-handshakes with the new presence).
-                    try {
-                        await fetch('/telephony/status/live', {
-                            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-                        });
-                    } catch (e) { /* best-effort */ }
-
-                    if (this.ziwoSdkClient && typeof this.ziwoSdkClient.refresh === 'function') {
-                        try { await this.ziwoSdkClient.refresh(); } catch (_) { /* ignore */ }
-                    }
-
-                    // Run a full /telephony/status poll right now so the next
-                    // ring handler sees the latest presence and the Recent tab
-                    // refreshes. Don't wait on the response.
-                    this.phoneCheckStatus().catch(() => {});
-                    this.phoneLoadRecentLogs().catch(() => {});
-                } else {
-                    // Revert
-                    this.phoneAgentStatus = previous;
-                    console.warn('[ZIWO] setStatus failed:', data.message);
-                }
-            } catch (e) {
-                this.phoneAgentStatus = previous;
-                console.error('[ZIWO] setStatus error:', e);
-            } finally {
-                this.phoneUpdatingStatus = false;
-            }
-        },
-
         async phoneDisconnect() {
-            console.log('[ZIWO] phoneDisconnect: manually disconnecting telephony session');
-            // Mark explicit disconnect — prevents poll from re-authenticating us
             this._explicitDisconnect = true;
-            setTimeout(() => { this._explicitDisconnect = false; }, 5000);
-            // Tell the PBX we are going offline (best-effort, fire-and-forget).
+            // 1) tear down active calls via machine
+            Alpine.store('softphone').send?.({ type: 'HANGUP_ALL' });
+            // 2) give hangup a brief moment then force logout
+            await new Promise(r => setTimeout(r, 300));
+            Alpine.store('softphone').send?.({ type: 'AUTH_FAIL' });
+            // 3) call backend to invalidate server session
             try {
-                fetch('/telephony/status/set', {
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'available' })
-                }).catch(() => {});
-            } catch (_) { /* ignore */ }
-            try {
-                const response = await fetch('/telephony/disconnect', {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    }
-                });
-                if (!response.ok) {
-                    console.warn('Telephony disconnect returned', response.status);
-                }
-                if (window.Notification) window.Notification.info('Telephony session terminated.', 'Telephony Disconnected');
-            } catch (e) {
-                console.error('Telephony disconnect failed:', e);
-            } finally {
-                // Always reset UI state regardless of network/server outcome
-                console.log('[ZIWO] phoneDisconnect: resetting all state');
-                try { localStorage.removeItem('ziwo_auth'); } catch(_) {}
-                if (this.phoneRecentInterval) { clearInterval(this.phoneRecentInterval); this.phoneRecentInterval = null; }
-                this.phoneAuthenticated = false;
-                this.phoneStatus = 'offline';
-                this.phoneCollapsed = true;
-                this.ziwoToken = null;
-                this.ziwoSdkInitialized = false;
-                this.ziwoSdkClient = null;
-                this.ziwoDataLoaded = false;
-                this.stopCallTimer();
-                this.stopRinging();
-                this.currentCall = {
-                    id: null,
-                    uuid: null,
-                    caller_number: '',
-                    caller_name: '',
-                    is_held: false,
-                    is_muted: false,
-                    recording_paused: false,
-                    duration: 0
-                };
-                this.ziwoActiveCalls = {};
-                this.heldParticipants = [];
-                this.transferPanelOpen = false;
-                this.addOrCallOpen = false;
-                this.keypadPanelOpen = false;
-                this.dialNumberInput = '';
-                this.phoneTab = 'dialer';
-            }
-        },
-
-        async phoneDial() {
-            if (!this.dialNumberInput) return;
-            const num = this.dialNumberInput.trim();
-
-            // Debounce — prevent multi-tap from placing duplicate calls
-            const now = Date.now();
-            if (this._lastDialAt && (now - this._lastDialAt) < 2000) {
-                console.warn('[ZIWO SDK] phoneDial debounced (last dial', now - this._lastDialAt, 'ms ago)');
-                return;
-            }
-            this._lastDialAt = now;
-
-            if (['ringing', 'ringing_inbound', 'speaking', 'active', 'held'].includes(this.phoneStatus)) {
-                console.warn('[ZIWO SDK] phoneDial ignored — already in call, status=' + this.phoneStatus);
-                return;
-            }
-
-            // ── GUARD: SDK must be ready AND PBX must have accepted login ──
-            // The SDK's connect() resolves when the WebSocket opens, but the
-            // Verto login happens *after* (line 1281 of umd.js). If PBX sends
-            // error -32003 (silently swallowed at line 1477), position stays
-            // undefined and every startCall ships login=undefined@undefined,
-            // which PBX replies with Bye after 180 Ringing → symptom =
-            // ziwo-requesting → trying → early → hangup → destroy in <1s.
-            const verto = this.ziwoSdkClient?.verto;
-            const position = verto?.position;
-            const socketOpen = verto?.socket?.readyState === 1 || (this.ziwoSdkClient && (verto?.socket || verto?.options));
-            if (!socketOpen && verto?.socket?.readyState !== undefined) {
-                console.error('[ZIWO SDK] phoneDial: WebSocket not open (readyState=' + verto?.socket?.readyState + '). SDK not ready.');
-                if (window.Notification) window.Notification.warning('Telephony not connected. Wait a moment and try again.', 'Call Failed');
-                return;
-            }
-            if (!position || !position.name || !position.hostname || position.name.includes('undefined')) {
-                console.error('[ZIWO SDK] phoneDial: position not set yet. PBX login may have failed silently (-32003). position=', position, 'connectedAgent=', this.ziwoSdkClient?.connectedAgent);
-                if (window.Notification) window.Notification.error('PBX login pending. Please refresh the page in a few seconds.', 'Call Failed');
-                return;
-            }
-            console.log('[ZIWO SDK] phoneDial: position OK =', position.name + '@' + position.hostname);
-
-            // Stuck-call watchdog: if ziwo-active/trying/early never arrives within 60s,
-            // reset UI so the user can dial again. Clear any prior watchdog.
-            if (this._dialWatchdog) clearTimeout(this._dialWatchdog);
-            this._dialWatchdog = setTimeout(() => {
-                if (this.phoneStatus === 'ringing') {
-                    console.warn('[ZIWO SDK] Dial watchdog: no ziwo-active/trying within 60s, resetting UI');
-                    this.phoneStatus = 'online';
-                    this.stopCallTimer();
-                    this.stopRinging();
-                    this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
-                    if (window.Notification) window.Notification.warning('Call did not connect. Please try again.', 'Call Timeout');
-                }
-            }, 60000);
-
-            if (!this.ziwoSdkClient) {
-                console.error('[ZIWO SDK] SDK not initialized — cannot place call.');
-                if (window.Notification) window.Notification.error('Telephony SDK not ready. Please re-authenticate.', 'Call Failed');
-                return;
-            }
-            try {
-                console.log('[ZIWO SDK] Starting outbound call to:', num);
-                this.currentCall.caller_number = num;
-                this.currentCall.caller_name = '';
-                this.currentCall.duration = 0;
-                this.currentCall.direction = 'outbound';
-                this.phoneStatus = 'ringing';
-                this.phoneCollapsed = false;
-                this.caller.number = num;
-                this.searchCaller();
-                this.ziwoSdkClient.startCall(num);
-            } catch (e) {
-                console.error('[ZIWO SDK] Outbound call failed:', e);
-                this.phoneStatus = 'online';
-                this.currentCall.id = null;
-                this.currentCall.uuid = null;
-                if (window.Notification) window.Notification.error('Could not place outbound call.', 'Call Failed');
-            }
-        },
-
-        async phoneAnswer() {
-            const call = Object.values(this.ziwoActiveCalls)[0];
-            console.log('[ZIWO SDK] Answering call:', call);
-            this.stopRinging();
-
-            const callId = call ? (call.callId || call.id) : this.currentCall.id;
-            if (callId) {
-                fetch('/telephony/answer', {
+                await fetch('/telephony/disconnect', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
                     },
-                    body: JSON.stringify({ call_id: callId })
-                }).catch(err => console.error('Failed to notify backend of answer:', err));
-            }
+                    body: JSON.stringify({}),
+                });
+            } catch(_) {}
+            // 4) wipe local state
+            try { localStorage.removeItem('ziwo_auth'); } catch(_) {}
+            this.phoneAuthenticated = false;
+            this.phoneStatus = 'offline';
+            this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
+            this.stopCallTimer?.();
+            this.stopRinging?.();
+            // 5) allow incoming calls again after re-login
+            this._explicitDisconnect = false;
+        },
 
-            if (!call) {
-                console.warn('[ZIWO SDK] No active call object to answer');
-                return;
-            }
+        // ── Call actions (proxy to state machine) ───────────────────────────
+        phoneDial() {
+            const n = this.dialNumberInput?.trim();
+            if (!n) return;
+            Alpine.store('softphone').send?.({ type: 'DIAL', number: n });
+        },
+
+        phoneAnswer() {
+            Alpine.store('softphone').send?.({ type: 'ANSWER' });
+        },
+
+        phoneHangup() {
+            Alpine.store('softphone').send?.({ type: 'HANGUP_ALL' });
+        },
+
+        phoneHold() {
+            Alpine.store('softphone').send?.({ type: 'HOLD' });
+        },
+
+        phoneResume() {
+            Alpine.store('softphone').send?.({ type: 'UNHOLD' });
+        },
+
+        phoneMute() {
+            Alpine.store('softphone').send?.({ type: 'MUTE' });
+        },
+
+        phoneUnmute() {
+            Alpine.store('softphone').send?.({ type: 'UNMUTE' });
+        },
+
+        phoneSendDtmf(digit) {
+            if (!digit) return;
+            this.dtmfInput = (this.dtmfInput || '') + digit;
+            // Send to adapter directly (doesn't need to go through state machine)
+            const callId = this.currentCall?.id;
             try {
-                if (typeof call.answer === 'function') {
-                    call.answer();
-                } else if (typeof call.accept === 'function') {
-                    call.accept();
-                } else {
-                    console.error('[ZIWO SDK] Call object has no answer/accept method. Keys:', Object.keys(call));
+                window.Alpine?.store('softphone');
+                // Access adapter via SDK
+                if (window.ziwoSdkClient) {
+                    const call = window.ziwoSdkClient.currentCall || window.ziwoSdkClient.call || window.ziwoSdkClient.activeCall;
+                    if (call && typeof call.sendDtmf === 'function') call.sendDtmf(digit);
                 }
-            } catch (e) {
-                console.error('[ZIWO SDK] Answer failed:', e);
-                this.phoneStatus = 'ringing_inbound';
-                this.startRinging();
+            } catch(_) {}
+            // Also send via backend
+            fetch('/telephony/dtmf', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                },
+                body: JSON.stringify({ call_id: callId, digit }),
+            }).catch(() => {});
+        },
+
+        phoneMergeCalls() {
+            // Merge = add held participants into a conference
+            if (this.heldParticipants.length > 0) {
+                const p = this.heldParticipants[0];
+                Alpine.store('softphone').send?.({ type: 'ADD_PARTICIPANT', number: p.number, name: p.name });
             }
         },
 
-        async phoneHangup() {
-            // Determine which leg to operate on (currentCall, not arbitrary first call).
-            let currentCallId = this.currentCall.id;
-            let call = currentCallId
-                ? (this.ziwoActiveCalls[currentCallId] || Object.values(this.ziwoActiveCalls).find(c => (c.callId || c.id) === currentCallId))
-                : Object.values(this.ziwoActiveCalls)[0];
-
-            // Direct check of ziwoSdkClient's active call objects if map is empty
-            if (!call && this.ziwoSdkClient) {
-                call = this.ziwoSdkClient.currentCall || this.ziwoSdkClient.call || this.ziwoSdkClient.activeCall;
-            }
-
-            // Pending marker fallback (set by phoneDial() before ziwo-requesting replaces).
-            if (!call && currentCallId && currentCallId.toString().startsWith('pending-') && this.currentCall.caller_number) {
-                call = Object.values(this.ziwoActiveCalls).find(c =>
-                    c.phoneNumber === this.currentCall.caller_number ||
-                    c.callerNumber === this.currentCall.caller_number
-                );
-            }
-
-            // Dialing outbound fallback.
-            if (!call && (this.phoneStatus === 'ringing' || this.phoneStatus === 'ringing_outbound')) {
-                call = Object.values(this.ziwoActiveCalls).find(c => c.direction === 'outbound' || c.phoneNumber === this.currentCall.caller_number);
-            }
-
-            const isRinging = this.phoneStatus === 'ringing' || this.phoneStatus === 'ringing_inbound' || this.phoneStatus === 'ringing_outbound';
-            console.log('[ZIWO SDK]', isRinging ? 'Rejecting' : 'Hanging up', 'call:', call);
-            this.stopRinging();
-
-            const callId = call ? (call.callId || call.id) : currentCallId;
-            if (callId) {
-                try {
-                    await fetch('/telephony/hangup', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                            'Accept': 'application/json'
-                        },
-                        body: JSON.stringify({ call_id: callId })
-                    });
-                } catch (err) {
-                    console.error('Failed to notify backend of hangup/reject:', err);
-                }
-            }
-
-            if (!call) {
-                console.warn('[ZIWO SDK] No call object — forcing UI reset.');
-                this.phoneStatus = 'online';
-                this.stopCallTimer();
-                this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
-                return;
-            }
-            try {
-                // Use official SDK API: hangupActiveCall() / blindTransfer on the call object.
-                // For outbound ringing: call.hangup() is correct (SDK fires ziwo-hangup).
-                // For active calls: ziwoSdkClient.hangupActiveCall() is the official method.
-                if (isRinging) {
-                    // Outbound ringing — call.hangup() cancels the outgoing dial
-                    if (typeof call.hangup === 'function') {
-                        call.hangup();
-                    } else if (this.ziwoSdkClient && typeof this.ziwoSdkClient.hangupActiveCall === 'function') {
-                        this.ziwoSdkClient.hangupActiveCall();
-                    }
-                } else {
-                    // Active call — prefer client-level hangupActiveCall() which handles held states too
-                    if (this.ziwoSdkClient && typeof this.ziwoSdkClient.hangupActiveCall === 'function') {
-                        this.ziwoSdkClient.hangupActiveCall();
-                    } else if (typeof call.hangup === 'function') {
-                        call.hangup();
-                    }
-                }
-            } catch (e) {
-                console.error('[ZIWO SDK] Hangup failed:', e);
-            }
-
-            // Optimistic UI reset — SDK will fire ziwo-hangup to confirm, but if it doesn't,
-            // we still don't want a stuck "ringing" state.
-            if (isRinging) {
-                this.phoneStatus = 'online';
-                this.stopRinging();
-                this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
-                this.heldParticipants = [];
-                this.conferenceParticipants = [];
-            }
+        phoneAddConferenceParticipant(number) {
+            if (!number) return;
+            this.addOrCallOpen = false;
+            this.addOrCallInput = '';
+            Alpine.store('softphone').send?.({ type: 'ADD_PARTICIPANT', number });
         },
 
-        async phoneHold() {
-            const callId = this.currentCall.id;
-            console.log('[ZIWO SDK] Holding call:', callId);
-            try {
-                // Official API: holdActiveCall() on ZiwoClient
-                if (this.ziwoSdkClient && typeof this.ziwoSdkClient.holdActiveCall === 'function') {
-                    this.ziwoSdkClient.holdActiveCall();
-                } else {
-                    const call = callId
-                        ? (this.ziwoActiveCalls[callId] || Object.values(this.ziwoActiveCalls)[0])
-                        : Object.values(this.ziwoActiveCalls)[0];
-                    if (call && typeof call.hold === 'function') call.hold();
-                }
-                if (callId) {
-                    fetch('/telephony/hold', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                        body: JSON.stringify({ call_id: callId })
-                    }).catch(() => {});
-                }
-            } catch (e) {
-                console.error('[ZIWO SDK] Hold failed:', e);
-            }
-        },
-
-        async phoneResume() {
-            const callId = this.currentCall.id;
-            console.log('[ZIWO SDK] Resuming call:', callId);
-            try {
-                this.isConferenceResuming = true;
-                // Official API: unholdActiveCall() on ZiwoClient
-                if (this.ziwoSdkClient && typeof this.ziwoSdkClient.unholdActiveCall === 'function') {
-                    this.ziwoSdkClient.unholdActiveCall();
-                } else {
-                    const call = callId
-                        ? (this.ziwoActiveCalls[callId] || Object.values(this.ziwoActiveCalls)[0])
-                        : Object.values(this.ziwoActiveCalls)[0];
-                    if (call && typeof call.unhold === 'function') call.unhold();
-                }
-                if (callId) {
-                    fetch('/telephony/resume', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                        body: JSON.stringify({ call_id: callId })
-                    }).catch(() => {});
-                }
-            } catch (e) {
-                console.error('[ZIWO SDK] Resume failed:', e);
-                this.isConferenceResuming = false;
-            }
-        },
-
-        // ── Switch to a held call (tap held card) ────────────────────────
-        async switchToHeldCall(participant) {
-            if (!participant || !participant.id) return;
-
-            // ── CASE A: Cancel a ringing outbound conference leg ──────────
-            // When agent is dialing a 2nd leg and taps the held card to cancel,
-            // the ZIWO SDK automatically resumes the held call (fires ziwo-active).
-            // We just need to cancel the outbound leg and let the SDK do the rest.
-            if (this.phoneStatus === 'ringing') {
-                console.log('[Softphone] Canceling outbound ringing leg — SDK will auto-resume held call.');
-                // Set flag so ziwo-active knows to restore the held participant's data
-                this._pendingResumeParticipant = participant;
-                // Remove from heldParticipants now (the ziwo-active handler will restore currentCall)
-                const idx = this.heldParticipants.findIndex(p => p.id === participant.id);
-                if (idx !== -1) this.heldParticipants.splice(idx, 1);
-                // Cancel outbound leg — ziwo-hangup → ziwo-destroy will fire,
-                // and since heldParticipants is now empty, ziwo-active for the
-                // existing held call will set phoneStatus = 'speaking'
-                await this.phoneHangup();
-                return;
-            }
-
-            // ── CASE B: Swap between two connected calls ──────────────────
-            // 1. Snapshot current call to place it on hold
-            const currentId     = this.currentCall.id;
-            const currentNum    = this.currentCall.caller_number;
-            const currentName   = this.currentCall.caller_name;
-            const currentDur    = this.currentCall.duration;
-            const currentDir    = this.currentCall.direction || 'inbound';
-
-            // 2. Hold the current call
-            if (currentId) {
-                const currentSdk = this.ziwoActiveCalls[currentId];
-                if (currentSdk && typeof currentSdk.hold === 'function') {
-                    try { currentSdk.hold(); } catch (e) { console.warn('[ZIWO] Switch-hold failed:', e); }
-                }
-                fetch('/telephony/hold', {
+        // ── Transfer actions ─────────────────────────────────────────────────
+        phoneExecuteTransfer(type = 'blind', number = null) {
+            const n = number || this.transferNumber?.trim();
+            if (!n) return;
+            if (type === 'blind') {
+                fetch('/telephony/transfer', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                    body: JSON.stringify({ call_id: currentId })
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                    },
+                    body: JSON.stringify({ number: n, type: 'blind', call_id: this.currentCall.id }),
+                }).then(() => {
+                    Alpine.store('softphone').send?.({ type: 'REMOTE_HANGUP' });
                 }).catch(() => {});
-
-                // Push current call back to heldParticipants (dedup)
-                const alreadyHeld = this.heldParticipants.some(p => p.id === currentId);
-                if (!alreadyHeld) {
-                    this.heldParticipants.push({
-                        id: currentId,
-                        number: currentNum,
-                        name: currentName,
-                        flag: this.getCountryFlagAndLocalTime(currentNum).flag,
-                        duration: currentDur,
-                        direction: currentDir,
-                        heldAt: Date.now()
-                    });
-                }
-            }
-
-            // 3. Remove the target participant from heldParticipants
-            const idx = this.heldParticipants.findIndex(p => p.id === participant.id);
-            if (idx !== -1) this.heldParticipants.splice(idx, 1);
-
-            // 4. Resume target call on SDK
-            const targetSdk = this.ziwoActiveCalls[participant.id];
-            this.isConferenceResuming = true;
-            if (targetSdk && typeof targetSdk.unhold === 'function') {
-                try { targetSdk.unhold(); } catch (e) {
-                    console.warn('[ZIWO] Switch-resume failed:', e);
-                    this.isConferenceResuming = false;
-                }
             } else {
-                this.isConferenceResuming = false;
+                Alpine.store('softphone').send?.({ type: 'START_TRANSFER', number: n });
             }
-
-            // 5. Notify backend
-            fetch('/telephony/resume', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                body: JSON.stringify({ call_id: participant.id })
-            }).catch(() => {});
-
-            // 6. Update currentCall to the resumed participant
-            this.currentCall = {
-                id: participant.id,
-                uuid: participant.id,
-                caller_number: participant.number,
-                caller_name: participant.name,
-                is_held: false,
-                is_muted: false,
-                recording_paused: false,
-                duration: participant.duration || 0,
-                direction: participant.direction || 'inbound'
-            };
-            this.phoneStatus = 'speaking';
+            this.transferPanelOpen = false;
+            this.transferNumber = '';
         },
 
-        // ── Disconnect a held call (× button on held card) ──────────────
-        toggleMuteHeldCall(p) {
-            p.is_muted = !p.is_muted;
-            const call = this.ziwoActiveCalls[p.id];
-            if (call) {
-                try {
-                    if (p.is_muted) {
-                        if (typeof call.mute === 'function') call.mute();
-                    } else {
-                        if (typeof call.unmute === 'function') call.unmute();
-                    }
-                } catch (err) {
-                    console.warn('[ZIWO] Mute held call failed:', err);
-                }
-            }
-            fetch(p.is_muted ? '/telephony/mute' : '/telephony/unmute', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                body: JSON.stringify({ call_id: p.id })
-            }).catch(() => {});
+        phoneCancelAttendedTransfer() {
+            Alpine.store('softphone').send?.({ type: 'CANCEL_TRANSFER' });
+            this.transferPanelOpen = false;
         },
 
-        async hangupHeldCall(participant) {
-            if (!participant || !participant.id) return;
-            const sdkCall = this.ziwoActiveCalls[participant.id];
-            if (sdkCall && typeof sdkCall.hangup === 'function') {
-                try { sdkCall.hangup(); } catch (e) { console.warn('[ZIWO] Hangup held failed:', e); }
-            }
-            // Remove from heldParticipants immediately
-            const idx = this.heldParticipants.findIndex(p => p.id === participant.id);
-            if (idx !== -1) this.heldParticipants.splice(idx, 1);
-            delete this.ziwoActiveCalls[participant.id];
-            fetch('/telephony/hangup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                body: JSON.stringify({ call_id: participant.id })
-            }).catch(() => {});
+        phoneResumeHeldParticipant(participantId) {
+            Alpine.store('softphone').send?.({ type: 'RESUME_PARTICIPANT', participantId });
         },
 
-        async phoneMute() {
-            const call = Object.values(this.ziwoActiveCalls)[0];
-            if (!call) return;
-            try {
-                call.mute();
-            } catch (e) {
-                console.error('[ZIWO SDK] Mute failed:', e);
-            }
-        },
-
-        async phoneUnmute() {
-            const call = Object.values(this.ziwoActiveCalls)[0];
-            if (!call) return;
-            try {
-                call.unmute();
-            } catch (e) {
-                console.error('[ZIWO SDK] Unmute failed:', e);
-            }
-        },
-
-        async phoneToggleRecording() {
-            if (!this.currentCall.id) return;
-            const newPauseState = !this.currentCall.recording_paused;
-            try {
-                const response = await fetch('/telephony/recording', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        call_id: this.currentCall.id,
-                        pause: newPauseState
-                    })
-                });
-                if (response.ok) {
-                    this.currentCall.recording_paused = newPauseState;
-                    if (window.Notification) {
-                        window.Notification.info(
-                            newPauseState ? 'Call recording paused.' : 'Call recording resumed.',
-                            'Recording Protocol'
-                        );
-                    }
-                }
-            } catch (e) {
-                console.error('Toggle recording failed:', e);
-            }
+        // ── UI helpers ───────────────────────────────────────────────────────
+        togglePhoneCollapse() {
+            this.phoneCollapsed = !this.phoneCollapsed;
         },
 
         openInlineTransfer() {
@@ -3016,384 +1895,14 @@ window.intakeComponent = function () {
             this.transferPanelOpen = true;
         },
 
-        async phoneExecuteTransfer(type, targetNumber = null) {
-            const dest = targetNumber || this.transferNumber;
-            if (!dest) return;
-
-            // Use official SDK API methods for transfers:
-            //   blind  → call.blindTransfer(dest) OR ziwoSdkClient.blindTransferActiveCall(dest)
-            //   warm   → call.attendedTransfer(dest) OR ziwoSdkClient.attendedTransferActiveCall(dest)
-            //            then: ziwoSdkClient.proceedAttendedTransferActiveCall() to complete
-            const callId = this.currentCall.id;
-            const call = callId ? (this.ziwoActiveCalls[callId] || Object.values(this.ziwoActiveCalls)[0]) : Object.values(this.ziwoActiveCalls)[0];
-            try {
-                if (type === 'attended' || type === 'warm') {
-                    // Attended: hold current call, dial dest, agent can talk before completing
-                    if (call && typeof call.attendedTransfer === 'function') {
-                        const transferCall = await call.attendedTransfer(dest);
-                        // Store so UI can offer "Complete Transfer" or "Cancel Transfer"
-                        this.attendedTransferPendingCall = transferCall;
-                        this.attendedTransferOriginalCall = call;
-                        if (window.Notification) window.Notification.info(`Calling ${dest}… Answer and click Complete Transfer to hand off.`, 'Attended Transfer');
-                        this.transferPanelOpen = false;
-                        return; // Do not close/reset yet — agent must complete or cancel
-                    } else if (this.ziwoSdkClient && typeof this.ziwoSdkClient.attendedTransferActiveCall === 'function') {
-                        this.ziwoSdkClient.attendedTransferActiveCall(dest);
-                        this.attendedTransferPending = true;
-                        if (window.Notification) window.Notification.info(`Calling ${dest}…`, 'Attended Transfer');
-                        this.transferPanelOpen = false;
-                        return;
-                    }
-                } else {
-                    // Blind transfer: hand off immediately, agent disconnects
-                    if (call && typeof call.blindTransfer === 'function') {
-                        call.blindTransfer(dest);
-                    } else if (this.ziwoSdkClient && typeof this.ziwoSdkClient.blindTransferActiveCall === 'function') {
-                        this.ziwoSdkClient.blindTransferActiveCall(dest);
-                    }
-                }
-            } catch (err) {
-                console.warn('[ZIWO SDK] Transfer exception:', err);
-            }
-
-            try {
-                const response = await fetch('/telephony/transfer', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        call_id: callId,
-                        target_number: dest,
-                        type: type
-                    })
-                });
-                if (response.ok) {
-                    this.transferPanelOpen = false;
-                    this.phoneStatus = 'online';
-                    this.stopCallTimer();
-                    this.stopRinging();
-                    if (window.Notification) window.Notification.success(`Call transfer initiated to ${dest}.`, 'Call Transferred');
-                } else {
-                    const data = await response.json();
-                    if (window.Notification) window.Notification.error(data.message || 'Transfer failed.', 'Protocol Alert');
-                }
-            } catch (e) {
-                console.error('Execute transfer failed:', e);
-            }
-        },
-
-        // ─── Add or Call Panel logic ───
-
         openAddOrCallPanel() {
-            this.addOrCallInput = '+' + String(this.addOrCallSelectedCountry.dial).replace('+', '');
+            this.addOrCallTab = 'phonebook';
             this.addOrCallSearch = '';
-            this.addOrCallDialpadOpen = false;
-            this.addOrCallCountryPickerOpen = false;
             this.addOrCallOpen = true;
         },
 
         closeAddOrCallPanel() {
             this.addOrCallOpen = false;
-            this.addOrCallCountryPickerOpen = false;
-        },
-
-        addOrCallKeypad(key) {
-            if (key === 'backspace') {
-                this.addOrCallInput = this.addOrCallInput.slice(0, -1);
-            } else {
-                this.addOrCallInput += key;
-            }
-            // Detect country prefix as user types
-            const country = this.detectCountryFromNumber(this.addOrCallInput);
-            if (country) this.addOrCallSelectedCountry = country;
-        },
-
-        get filteredCountries() {
-            const q = this.addOrCallSearch.toLowerCase();
-            return this.COUNTRY_DATA.filter(c =>
-                c.name.toLowerCase().includes(q) || c.dial.includes(q) || c.code.toLowerCase().includes(q)
-            );
-        },
-
-        selectAddOrCallCountry(country) {
-            this.addOrCallSelectedCountry = country;
-            this.addOrCallInput = '+' + country.dial;
-            this.addOrCallCountryPickerOpen = false;
-        },
-
-        get filteredTeammates() {
-            const q = this.addOrCallSearch.toLowerCase();
-            return this.ziwoTeammates.filter(t =>
-                t.name.toLowerCase().includes(q) || t.ext.includes(q)
-            );
-        },
-
-        get filteredQueues() {
-            const q = this.addOrCallSearch.toLowerCase();
-            return this.ziwoQueues.filter(q2 =>
-                q2.name.toLowerCase().includes(q)
-            );
-        },
-
-        get filteredPhonebook() {
-            const q = this.addOrCallSearch.toLowerCase();
-            return this.phonebookContacts.filter(c =>
-                (c.name || '').toLowerCase().includes(q) || (c.phone_number || '').includes(q)
-            );
-        },
-
-        get formattedHeldDuration() {
-            return (p) => {
-                const h = Math.floor(p.duration / 3600).toString().padStart(2, '0');
-                const m = Math.floor((p.duration % 3600) / 60).toString().padStart(2, '0');
-                const s = (p.duration % 60).toString().padStart(2, '0');
-                return `${h}:${m}:${s}`;
-            };
-        },
-
-        async phoneAddConferenceParticipant(targetNumber, displayName = '') {
-            return this.executeAddToCall(targetNumber, displayName);
-        },
-
-        async executeAddToCall(targetNumber, displayName) {
-            if (!targetNumber) return;
-
-            // ── Step 1: Snapshot the current caller before we modify anything ──
-            const previousCallerNumber = this.currentCall.caller_number;
-            const previousCallerName   = this.currentCall.caller_name;
-            const previousCallId       = this.currentCall.id;
-            const previousCallDuration = this.currentCall.duration;
-
-            // ── Step 2: Put the current active caller on hold (soft hold only — no reset) ──
-            if (previousCallerNumber) {
-                const participant = {
-                    number: previousCallerNumber,
-                    name: previousCallerName || previousCallerNumber,
-                    flag: this.getCountryFlagAndLocalTime(previousCallerNumber).flag,
-                    duration: previousCallDuration,
-                    direction: this.currentCall.direction || 'inbound',
-                    heldAt: Date.now(),
-                    id: previousCallId
-                };
-
-                // Put SDK call on hold (does NOT destroy it)
-                const existingCall = previousCallId
-                    ? (this.ziwoActiveCalls[previousCallId] || Object.values(this.ziwoActiveCalls)[0])
-                    : Object.values(this.ziwoActiveCalls)[0];
-                if (existingCall && typeof existingCall.hold === 'function') {
-                    try { existingCall.hold(); } catch (e) { console.warn('[ZIWO] Hold failed:', e); }
-                }
-
-                // Notify backend of hold (fire-and-forget)
-                if (previousCallId) {
-                    fetch('/telephony/hold', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                        body: JSON.stringify({ call_id: previousCallId })
-                    }).catch(() => {});
-                }
-
-                // Only push if not already tracked (prevents duplicate held cards)
-                const alreadyHeld = this.heldParticipants.some(p => p.id === previousCallId);
-                if (!alreadyHeld) {
-                    this.heldParticipants.push(participant);
-                }
-                this.currentCall.is_held = true;
-                // Keep the call timer running — do NOT call stopCallTimer()
-            }
-
-            this.closeAddOrCallPanel();
-
-            // SDK real-mode: dial the new leg via SDK
-            if (this.ziwoSdkClient) {
-                try {
-                    // Update tracking for incoming ziwo-active event
-                    this.currentCall.caller_number = targetNumber;
-                    this.currentCall.caller_name   = displayName || '';
-                    this.currentCall.is_held       = false;
-                    this.currentCall.duration      = 0;
-                    this.currentCall.direction     = 'outbound';
-                    this.phoneStatus = 'ringing';
-                    this.ziwoSdkClient.startCall(targetNumber);
-                    if (window.Notification) window.Notification.info(`Calling ${displayName || targetNumber}… previous caller is on hold.`, 'Conference Mode');
-                } catch (e) {
-                    console.error('[ZIWO SDK] Conference dial failed:', e);
-                    // Restore previous caller if dial failed
-                    this.currentCall.caller_number = previousCallerNumber;
-                    this.currentCall.caller_name   = previousCallerName;
-                    this.currentCall.is_held       = false;
-                }
-            }
-
-            // Notify backend
-            if (previousCallId) {
-                fetch('/telephony/conference', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                    body: JSON.stringify({ call_id: previousCallId, target_number: targetNumber })
-                }).catch(() => {});
-            }
-        },
-
-        async phoneResumeHeldParticipant(heldCallId) {
-            const heldIndex = this.heldParticipants.findIndex(p => p.id === heldCallId);
-            if (heldIndex === -1) return;
-
-            const heldEntry = this.heldParticipants[heldIndex];
-            const currentActive = { ...this.currentCall };
-
-            // 1. Put current call on hold in SDK & Backend
-            const currentCallObj = this.ziwoActiveCalls[currentActive.id] || Object.values(this.ziwoActiveCalls)[0];
-            if (currentCallObj && typeof currentCallObj.hold === 'function') {
-                try { currentCallObj.hold(); } catch (err) { console.warn('[ZIWO] Hold failed:', err); }
-            }
-            if (currentActive.id) {
-                fetch('/telephony/hold', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                    body: JSON.stringify({ call_id: currentActive.id })
-                }).catch(() => {});
-            }
-
-            // Swap held and currentActive
-            this.heldParticipants.splice(heldIndex, 1);
-            this.heldParticipants.push({
-                number: currentActive.caller_number,
-                name: currentActive.caller_name || currentActive.caller_number,
-                flag: this.getCountryFlagAndLocalTime(currentActive.caller_number).flag,
-                duration: currentActive.duration,
-                direction: currentActive.direction || 'inbound',
-                heldAt: Date.now(),
-                id: currentActive.id
-            });
-
-            // 2. Resume held call in SDK & Backend
-            this.isConferenceResuming = true;
-            const nextCallObj = this.ziwoActiveCalls[heldCallId];
-            if (nextCallObj && typeof nextCallObj.unhold === 'function') {
-                try { nextCallObj.unhold(); } catch (err) { console.warn('[ZIWO] Unhold failed:', err); }
-            }
-            fetch('/telephony/resume', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                body: JSON.stringify({ call_id: heldCallId })
-            }).catch(() => {});
-
-            // Update UI State
-            this.currentCall = {
-                id: heldCallId,
-                uuid: heldCallId,
-                caller_number: heldEntry.number,
-                caller_name: heldEntry.name,
-                is_held: false,
-                is_muted: false,
-                recording_paused: false,
-                duration: heldEntry.duration || 0,
-                direction: heldEntry.direction || 'inbound'
-            };
-            this.phoneStatus = 'speaking';
-            this.isConferenceResuming = false;
-        },
-
-        async phoneMergeCalls() {
-            // IMPORTANT: Ziwo SDK has NO conference API.
-            // "Merge" in Ziwo = complete the attended (warm) transfer:
-            //   proceedAttendedTransferActiveCall() bridges the two legs at PBX level.
-            //   The agent drops off and both parties are connected.
-            if (window.Notification) window.Notification.info('Completing transfer \u2014 bridging both parties...', 'Transfer');
-
-            try {
-                if (this.ziwoSdkClient && typeof this.ziwoSdkClient.proceedAttendedTransferActiveCall === 'function') {
-                    this.ziwoSdkClient.proceedAttendedTransferActiveCall();
-                } else if (this.attendedTransferOriginalCall && this.attendedTransferPendingCall
-                    && typeof this.attendedTransferOriginalCall.proceedAttendedTransfer === 'function') {
-                    this.attendedTransferOriginalCall.proceedAttendedTransfer(this.attendedTransferPendingCall);
-                } else {
-                    // Fallback to backend conference API if SDK method not available
-                    const held = this.heldParticipants[0];
-                    if (held) {
-                        await fetch('/telephony/conference', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
-                            body: JSON.stringify({ call_id: this.currentCall.id, target_number: held.number, room_id: this.currentCall.id })
-                        });
-                    }
-                }
-                // Clear state — SDK will fire ziwo-destroy/ziwo-hangup to confirm
-                this.attendedTransferPendingCall = null;
-                this.attendedTransferOriginalCall = null;
-                this.attendedTransferPending = false;
-                this.heldParticipants = [];
-                if (window.Notification) window.Notification.success('Transfer complete. Parties connected.', 'Transfer Done');
-                // Reset softphone UI back to idle
-                setTimeout(() => {
-                    if (this.phoneStatus !== 'online') {
-                        this.phoneStatus = 'online';
-                        this.stopCallTimer();
-                        this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
-                    }
-                }, 1500);
-            } catch (err) {
-                console.error('[ZIWO SDK] Transfer proceed failed:', err);
-                if (window.Notification) window.Notification.error('Could not complete transfer.', 'Transfer Failed');
-            }
-        },
-
-        async phoneCancelAttendedTransfer() {
-            // Cancel attended transfer: unhold original, disconnect transfer leg
-            if (window.Notification) window.Notification.info('Cancelling transfer, resuming original call...', 'Transfer');
-            try {
-                if (this.ziwoSdkClient && typeof this.ziwoSdkClient.cancelAttendedTransferActiveCall === 'function') {
-                    this.ziwoSdkClient.cancelAttendedTransferActiveCall();
-                }
-                this.attendedTransferPendingCall = null;
-                this.attendedTransferOriginalCall = null;
-                this.attendedTransferPending = false;
-                this.heldParticipants = [];
-            } catch (err) {
-                console.error('[ZIWO SDK] Cancel transfer failed:', err);
-            }
-        },
-
-        async phoneSearchContacts() {
-            try {
-                const params = new URLSearchParams();
-                if (this.phoneSearchQuery) params.append('query', this.phoneSearchQuery);
-
-                // Live ZIWO CRM is the source of truth for the directory tab.
-                // Falls back to local phonebook if the CRM call fails.
-                let contacts = [];
-                try {
-                    const crmRes = await fetch(`/telephony/crm/search?${params.toString()}`, {
-                        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-                    });
-                    if (crmRes.ok) {
-                        const data = await crmRes.json();
-                        contacts = data.contacts || [];
-                    }
-                } catch (e) {
-                    console.warn('[ZIWO] CRM directory fetch failed, falling back to local phonebook', e);
-                }
-
-                if (contacts.length === 0) {
-                    // Local phonebook fallback
-                    const localParams = new URLSearchParams();
-                    if (this.phoneSearchQuery) localParams.append('query', this.phoneSearchQuery);
-                    if (this.phoneCategoryFilter) localParams.append('category', this.phoneCategoryFilter);
-                    const response = await fetch(`/telephony/phonebook?${localParams.toString()}`, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
-                    if (response.ok) {
-                        const data = await response.json();
-                        contacts = Array.isArray(data) ? data : (data.contacts || []);
-                    }
-                }
-
-                this.phonebookContacts = contacts;
-            } catch (e) {
-                console.error('Fetch contacts failed:', e);
-            }
         },
 
         openAddContactModal() {
@@ -3401,92 +1910,176 @@ window.intakeComponent = function () {
             this.addContactOpen = true;
         },
 
-        async phoneSaveContact() {
-            if (!this.contactForm.name || !this.contactForm.phone_number) {
-                if (window.Notification) window.Notification.warning('Name and phone number are required.', 'Form Incomplete');
+        checkOrRequestMicrophone() {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                this.phoneStatusError = 'Microphone API not available in this browser.';
                 return;
             }
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    stream.getTracks().forEach(t => t.stop());
+                    this.micAllowed = true;
+                    this.phoneStatusError = '';
+                })
+                .catch(() => {
+                    this.micAllowed = false;
+                    this.phoneStatusError = 'Microphone access denied. Allow microphone in browser settings.';
+                });
+        },
+
+        async phoneToggleRecording() {
+            const callId = this.currentCall?.id;
+            if (!callId) return;
             try {
-                const response = await fetch('/telephony/phonebook', {
+                await fetch('/telephony/recording', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
                     },
-                    body: JSON.stringify(this.contactForm)
+                    body: JSON.stringify({ call_id: callId, action: this.currentCall.recording_paused ? 'resume' : 'pause' }),
                 });
-                if (response.ok) {
-                    this.addContactOpen = false;
-                    this.phoneSearchContacts();
-                    if (window.Notification) window.Notification.success('Contact added to CRM directory.', 'Contact Created');
-                } else {
-                    const data = await response.json();
-                    if (window.Notification) window.Notification.error(data.message || 'Failed to save contact.', 'Save Error');
-                }
-            } catch (e) {
-                console.error('Save contact failed:', e);
+                this.currentCall.recording_paused = !this.currentCall.recording_paused;
+            } catch(_) {}
+        },
+
+        async phoneUpdateAgentStatus(status) {
+            if (this.phoneUpdatingStatus) return;
+            if (status === 'offline') {
+                // 'offline' is not supported by /telephony/status/set validation
+                this.phoneAgentStatus = 'offline';
+                return;
             }
+            this.phoneUpdatingStatus = true;
+            try {
+                await fetch('/telephony/status/set', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                    },
+                    body: JSON.stringify({ status }),
+                });
+                this.phoneAgentStatus = this.mapZiwoAgentStatus(status);
+            } catch(_) {} finally {
+                this.phoneUpdatingStatus = false;
+            }
+        },
+
+        // ── Data loaders ─────────────────────────────────────────────────────
+        async phoneLoadRecentLogs() {
+            try {
+                const r = await fetch('/telephony/calls/live', { headers: { Accept: 'application/json' } });
+                if (r.ok) {
+                    const data = await r.json();
+                    this.recentCallLogs = Array.isArray(data) ? data : (Array.isArray(data?.calls) ? data.calls : []);
+                }
+            } catch(_) {}
+        },
+
+        async phoneSearchContacts() {
+            try {
+                const params = new URLSearchParams();
+                if (this.phoneSearchQuery)    params.set('query',    this.phoneSearchQuery);
+                if (this.phoneCategoryFilter) params.set('category', this.phoneCategoryFilter);
+                
+                // 1. Fetch local phonebook
+                const r1 = await fetch('/telephony/phonebook?' + params, { headers: { Accept: 'application/json' } });
+                const d1 = await r1.json();
+                const localList = Array.isArray(d1) ? d1 : (Array.isArray(d1?.contacts) ? d1.contacts : []);
+
+                // 2. Fetch ZIWO CRM contacts if there is a query
+                let crmList = [];
+                if (this.phoneSearchQuery) {
+                    const r2 = await fetch('/telephony/crm/search?' + params, { headers: { Accept: 'application/json' } });
+                    if (r2.ok) {
+                        const d2 = await r2.json();
+                        crmList = Array.isArray(d2) ? d2 : (Array.isArray(d2?.contacts) ? d2.contacts : []);
+                    }
+                }
+
+                // 3. Merge them together
+                this.phonebookContacts = [...localList, ...crmList];
+            } catch(_) {}
+        },
+
+        async phoneLoadTeammates() {
+            try {
+                const r = await fetch('/telephony/teammates', { headers: { Accept: 'application/json' } });
+                if (r.ok) {
+                    const data = await r.json();
+                    // API returns { status, teammates: [...] }
+                    this.ziwoTeammates = Array.isArray(data) ? data : (Array.isArray(data?.teammates) ? data.teammates : []);
+                }
+            } catch(_) {}
+        },
+
+        async phoneLoadQueues() {
+            try {
+                const r = await fetch('/telephony/queues', { headers: { Accept: 'application/json' } });
+                if (r.ok) {
+                    const data = await r.json();
+                    // API returns { status, queues: [...] }
+                    this.ziwoQueues = Array.isArray(data) ? data : (Array.isArray(data?.queues) ? data.queues : []);
+                }
+            } catch(_) {}
+        },
+
+        async phoneSaveContact() {
+            if (!this.contactForm.name || !this.contactForm.phone_number) return;
+            try {
+                const r = await fetch('/telephony/phonebook', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                    },
+                    body: JSON.stringify(this.contactForm),
+                });
+                if (r.ok) {
+                    this.addContactOpen = false;
+                    this.contactForm = { name: '', phone_number: '', category: 'custom' };
+                    this.phoneSearchContacts();
+                }
+            } catch(_) {}
         },
 
         async phoneDeleteContact(id) {
-            if (!confirm('Are you sure you want to delete this custom contact?')) return;
+            if (!confirm('Delete this contact?')) return;
             try {
-                const response = await fetch(`/telephony/phonebook/${id}`, {
+                await fetch('/telephony/phonebook/' + id, {
                     method: 'DELETE',
-                    headers: {
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Accept': 'application/json'
-                    }
+                    headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
                 });
-                if (response.ok) {
-                    this.phoneSearchContacts();
-                    if (window.Notification) window.Notification.info('Contact deleted from CRM directory.', 'Contact Removed');
-                }
-            } catch (e) {
-                console.error('Delete contact failed:', e);
-            }
+                this.phoneSearchContacts();
+            } catch(_) {}
         },
 
-        async phoneLoadRecentLogs() {
-            try {
-                const response = await fetch('/telephony/calls/live?limit=15', {
-                    headers: { 'Accept': 'application/json' }
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.status === 'success' && Array.isArray(data.calls)) {
-                        this.recentCallLogs = data.calls;
-                    }
-                }
-            } catch (e) {
-                // Silently swallow background poll errors for live call history
-            }
-        },
-
+        // ── Quick-dial bridge (form → softphone panel) ───────────────────────
         phoneTriggerQuickDial(number, name = '') {
-            // Fill main caller information inputs
             this.caller.number = number;
             if (name) this.caller.name = name;
-            
-            // Trigger caller lookup in form
-            this.searchCaller();
+            // Dispatch native event — softphone panel listens in its init()
+            window.dispatchEvent(new CustomEvent('softphone:dial', { detail: { number, name } }));
+            this.phoneCollapsed = false;
+        },
 
-            // Populate softphone dialer input
-            this.dialNumberInput = number;
-            
-            // Expand phone and set active tab to dialer
-            if (this.phoneCollapsed) {
-                this.togglePhoneCollapse();
-            }
-            this.phoneTab = 'dialer';
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // AUDIO & TIMER UTILITIES
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        startRinging() {
+            const audio = document.getElementById('ring-audio');
+            if (audio) { audio.currentTime = 0; audio.play().catch(() => {}); }
+        },
 
-            // Auto Dial
-            this.phoneDial();
+        stopRinging() {
+            const audio = document.getElementById('ring-audio');
+            if (audio) { audio.pause(); audio.currentTime = 0; }
         },
 
         startCallTimer() {
-            if (this.callDurationInterval) clearInterval(this.callDurationInterval);
+            this.stopCallTimer();
+            this.currentCall.duration = 0;
             this.callDurationInterval = setInterval(() => {
                 this.currentCall.duration++;
             }, 1000);
@@ -3497,408 +2090,33 @@ window.intakeComponent = function () {
                 clearInterval(this.callDurationInterval);
                 this.callDurationInterval = null;
             }
-            
-            // If we are stopping an active/ringing call, play the end call notification sound
-            if (this.currentCall.id || this.currentCall.uuid) {
-                this.playEndCallTone();
-            }
-
-            this.currentCall = {
-                id: null,
-                uuid: null,
-                caller_number: '',
-                caller_name: '',
-                is_held: false,
-                is_muted: false,
-                recording_paused: false,
-                duration: 0
-            };
         },
 
-        get formattedCallDuration() {
-            const h = Math.floor(this.currentCall.duration / 3600).toString().padStart(2, '0');
-            const m = Math.floor((this.currentCall.duration % 3600) / 60).toString().padStart(2, '0');
-            const s = (this.currentCall.duration % 60).toString().padStart(2, '0');
-            return `${h}:${m}:${s}`;
-        },
-
-        formatHeldCallDuration(duration) {
-            const h = Math.floor(duration / 3600).toString().padStart(2, '0');
-            const m = Math.floor((duration % 3600) / 60).toString().padStart(2, '0');
-            const s = (duration % 60).toString().padStart(2, '0');
-            return `${h}:${m}:${s}`;
-        },
-
-        // ── Full country dial-code → flag/code/name lookup ──
-        get COUNTRY_DATA() {
-            return [
-                { dial: '93',   code: 'AF', flag: '🇦🇫', name: 'Afghanistan' },
-                { dial: '358',  code: 'AX', flag: '🇦🇽', name: 'Åland Islands' },
-                { dial: '355',  code: 'AL', flag: '🇦🇱', name: 'Albania' },
-                { dial: '213',  code: 'DZ', flag: '🇩🇿', name: 'Algeria' },
-                { dial: '1684', code: 'AS', flag: '🇦🇸', name: 'American Samoa' },
-                { dial: '376',  code: 'AD', flag: '🇦🇩', name: 'Andorra' },
-                { dial: '244',  code: 'AO', flag: '🇦🇴', name: 'Angola' },
-                { dial: '1264', code: 'AI', flag: '🇦🇮', name: 'Anguilla' },
-                { dial: '1268', code: 'AG', flag: '🇦🇬', name: 'Antigua and Barbuda' },
-                { dial: '54',   code: 'AR', flag: '🇦🇷', name: 'Argentina' },
-                { dial: '374',  code: 'AM', flag: '🇦🇲', name: 'Armenia' },
-                { dial: '297',  code: 'AW', flag: '🇦🇼', name: 'Aruba' },
-                { dial: '61',   code: 'AU', flag: '🇦🇺', name: 'Australia' },
-                { dial: '43',   code: 'AT', flag: '🇦🇹', name: 'Austria' },
-                { dial: '994',  code: 'AZ', flag: '🇦🇿', name: 'Azerbaijan' },
-                { dial: '1242', code: 'BS', flag: '🇧🇸', name: 'Bahamas' },
-                { dial: '973',  code: 'BH', flag: '🇧🇭', name: 'Bahrain' },
-                { dial: '880',  code: 'BD', flag: '🇧🇩', name: 'Bangladesh' },
-                { dial: '1246', code: 'BB', flag: '🇧🇧', name: 'Barbados' },
-                { dial: '375',  code: 'BY', flag: '🇧🇾', name: 'Belarus' },
-                { dial: '32',   code: 'BE', flag: '🇧🇪', name: 'Belgium' },
-                { dial: '501',  code: 'BZ', flag: '🇧🇿', name: 'Belize' },
-                { dial: '229',  code: 'BJ', flag: '🇧🇯', name: 'Benin' },
-                { dial: '1441', code: 'BM', flag: '🇧🇲', name: 'Bermuda' },
-                { dial: '975',  code: 'BT', flag: '🇧🇹', name: 'Bhutan' },
-                { dial: '591',  code: 'BO', flag: '🇧🇴', name: 'Bolivia' },
-                { dial: '387',  code: 'BA', flag: '🇧🇦', name: 'Bosnia and Herzegovina' },
-                { dial: '267',  code: 'BW', flag: '🇧🇼', name: 'Botswana' },
-                { dial: '55',   code: 'BR', flag: '🇧🇷', name: 'Brazil' },
-                { dial: '246',  code: 'IO', flag: '🇮🇴', name: 'British Indian Ocean Territory' },
-                { dial: '673',  code: 'BN', flag: '🇧🇳', name: 'Brunei Darussalam' },
-                { dial: '359',  code: 'BG', flag: '🇧🇬', name: 'Bulgaria' },
-                { dial: '226',  code: 'BF', flag: '🇧🇫', name: 'Burkina Faso' },
-                { dial: '257',  code: 'BI', flag: '🇧🇮', name: 'Burundi' },
-                { dial: '855',  code: 'KH', flag: '🇰🇭', name: 'Cambodia' },
-                { dial: '237',  code: 'CM', flag: '🇨🇲', name: 'Cameroon' },
-                { dial: '1',    code: 'CA', flag: '🇨🇦', name: 'Canada' },
-                { dial: '238',  code: 'CV', flag: '🇨🇻', name: 'Cape Verde' },
-                { dial: '1345', code: 'KY', flag: '🇰🇾', name: 'Cayman Islands' },
-                { dial: '236',  code: 'CF', flag: '🇨🇫', name: 'Central African Republic' },
-                { dial: '235',  code: 'TD', flag: '🇹🇩', name: 'Chad' },
-                { dial: '56',   code: 'CL', flag: '🇨🇱', name: 'Chile' },
-                { dial: '86',   code: 'CN', flag: '🇨🇳', name: 'China' },
-                { dial: '57',   code: 'CO', flag: '🇨🇴', name: 'Colombia' },
-                { dial: '269',  code: 'KM', flag: '🇰🇲', name: 'Comoros' },
-                { dial: '243',  code: 'CD', flag: '🇨🇩', name: 'Congo (Kinshasa)' },
-                { dial: '242',  code: 'CG', flag: '🇨🇬', name: 'Congo (Brazzaville)' },
-                { dial: '682',  code: 'CK', flag: '🇨🇰', name: 'Cook Islands' },
-                { dial: '506',  code: 'CR', flag: '🇨🇷', name: 'Costa Rica' },
-                { dial: '225',  code: 'CI', flag: '🇨🇮', name: "Cote d'Ivoire" },
-                { dial: '385',  code: 'HR', flag: '🇭🇷', name: 'Croatia' },
-                { dial: '53',   code: 'CU', flag: '🇨🇺', name: 'Cuba' },
-                { dial: '357',  code: 'CY', flag: '🇨🇾', name: 'Cyprus' },
-                { dial: '420',  code: 'CZ', flag: '🇨🇿', name: 'Czech Republic' },
-                { dial: '45',   code: 'DK', flag: '🇩🇰', name: 'Denmark' },
-                { dial: '253',  code: 'DJ', flag: '🇩🇯', name: 'Djibouti' },
-                { dial: '1767', code: 'DM', flag: '🇩🇲', name: 'Dominica' },
-                { dial: '593',  code: 'EC', flag: '🇪🇨', name: 'Ecuador' },
-                { dial: '20',   code: 'EG', flag: '🇪🇬', name: 'Egypt' },
-                { dial: '503',  code: 'SV', flag: '🇸🇻', name: 'El Salvador' },
-                { dial: '240',  code: 'GQ', flag: '🇬🇶', name: 'Equatorial Guinea' },
-                { dial: '291',  code: 'ER', flag: '🇪🇷', name: 'Eritrea' },
-                { dial: '372',  code: 'EE', flag: '🇪🇪', name: 'Estonia' },
-                { dial: '251',  code: 'ET', flag: '🇪🇹', name: 'Ethiopia' },
-                { dial: '500',  code: 'FK', flag: '🇫🇰', name: 'Falkland Islands' },
-                { dial: '298',  code: 'FO', flag: '🇫🇴', name: 'Faroe Islands' },
-                { dial: '679',  code: 'FJ', flag: '🇫🇯', name: 'Fiji' },
-                { dial: '358',  code: 'FI', flag: '🇫🇮', name: 'Finland' },
-                { dial: '33',   code: 'FR', flag: '🇫🇷', name: 'France' },
-                { dial: '594',  code: 'GF', flag: '🇬🇫', name: 'French Guiana' },
-                { dial: '689',  code: 'PF', flag: '🇵🇫', name: 'French Polynesia' },
-                { dial: '241',  code: 'GA', flag: '🇬🇦', name: 'Gabon' },
-                { dial: '220',  code: 'GM', flag: '🇬🇲', name: 'Gambia' },
-                { dial: '995',  code: 'GE', flag: '🇬🇪', name: 'Georgia' },
-                { dial: '49',   code: 'DE', flag: '🇩🇪', name: 'Germany' },
-                { dial: '233',  code: 'GH', flag: '🇬🇭', name: 'Ghana' },
-                { dial: '350',  code: 'GI', flag: '🇬🇮', name: 'Gibraltar' },
-                { dial: '30',   code: 'GR', flag: '🇬🇷', name: 'Greece' },
-                { dial: '299',  code: 'GL', flag: '🇬🇱', name: 'Greenland' },
-                { dial: '1473', code: 'GD', flag: '🇬🇩', name: 'Grenada' },
-                { dial: '590',  code: 'GP', flag: '🇬🇵', name: 'Guadeloupe' },
-                { dial: '1671', code: 'GU', flag: '🇬🇺', name: 'Guam' },
-                { dial: '502',  code: 'GT', flag: '🇬🇹', name: 'Guatemala' },
-                { dial: '44',   code: 'GG', flag: '🇬🇬', name: 'Guernsey' },
-                { dial: '224',  code: 'GN', flag: '🇬🇳', name: 'Guinea' },
-                { dial: '245',  code: 'GW', flag: '🇬🇼', name: 'Guinea-Bissau' },
-                { dial: '592',  code: 'GY', flag: '🇬🇾', name: 'Guyana' },
-                { dial: '509',  code: 'HT', flag: '🇭🇹', name: 'Haiti' },
-                { dial: '504',  code: 'HN', flag: '🇭🇳', name: 'Honduras' },
-                { dial: '852',  code: 'HK', flag: '🇭🇰', name: 'Hong Kong' },
-                { dial: '36',   code: 'HU', flag: '🇭🇺', name: 'Hungary' },
-                { dial: '354',  code: 'IS', flag: '🇮🇸', name: 'Iceland' },
-                { dial: '91',   code: 'IN', flag: '🇮🇳', name: 'India' },
-                { dial: '62',   code: 'ID', flag: '🇮🇩', name: 'Indonesia' },
-                { dial: '98',   code: 'IR', flag: '🇮🇷', name: 'Iran' },
-                { dial: '964',  code: 'IQ', flag: '🇮🇶', name: 'Iraq' },
-                { dial: '353',  code: 'IE', flag: '🇮🇪', name: 'Ireland' },
-                { dial: '44',   code: 'IM', flag: '🇮🇲', name: 'Isle of Man' },
-                { dial: '972',  code: 'IL', flag: '🇮🇱', name: 'Israel' },
-                { dial: '39',   code: 'IT', flag: '🇮🇹', name: 'Italy' },
-                { dial: '1876', code: 'JM', flag: '🇯🇲', name: 'Jamaica' },
-                { dial: '81',   code: 'JP', flag: '🇯🇵', name: 'Japan' },
-                { dial: '44',   code: 'JE', flag: '🇯🇪', name: 'Jersey' },
-                { dial: '962',  code: 'JO', flag: '🇯🇴', name: 'Jordan' },
-                { dial: '7',    code: 'KZ', flag: '🇰🇿', name: 'Kazakhstan' },
-                { dial: '254',  code: 'KE', flag: '🇰🇪', name: 'Kenya' },
-                { dial: '686',  code: 'KI', flag: '🇰🇮', name: 'Kiribati' },
-                { dial: '850',  code: 'KP', flag: '🇰🇵', name: 'Korea (North)' },
-                { dial: '82',   code: 'KR', flag: '🇰🇷', name: 'Korea (South)' },
-                { dial: '965',  code: 'KW', flag: '🇰🇼', name: 'Kuwait' },
-                { dial: '996',  code: 'KG', flag: '🇰🇬', name: 'Kyrgyzstan' },
-                { dial: '856',  code: 'LA', flag: '🇱🇦', name: 'Laos' },
-                { dial: '371',  code: 'LV', flag: '🇱🇻', name: 'Latvia' },
-                { dial: '961',  code: 'LB', flag: '🇱🇧', name: 'Lebanon' },
-                { dial: '266',  code: 'LS', flag: '🇱🇸', name: 'Lesotho' },
-                { dial: '231',  code: 'LR', flag: '🇱🇷', name: 'Liberia' },
-                { dial: '218',  code: 'LY', flag: '🇱🇾', name: 'Libya' },
-                { dial: '423',  code: 'LI', flag: '🇱🇮', name: 'Liechtenstein' },
-                { dial: '370',  code: 'LT', flag: '🇱🇹', name: 'Lithuania' },
-                { dial: '352',  code: 'LU', flag: '🇱🇺', name: 'Luxembourg' },
-                { dial: '853',  code: 'MO', flag: '🇲🇴', name: 'Macao' },
-                { dial: '389',  code: 'MK', flag: '🇲🇰', name: 'Macedonia' },
-                { dial: '261',  code: 'MG', flag: '🇲🇬', name: 'Madagascar' },
-                { dial: '265',  code: 'MW', flag: '🇲🇼', name: 'Malawi' },
-                { dial: '60',   code: 'MY', flag: '🇲🇾', name: 'Malaysia' },
-                { dial: '960',  code: 'MV', flag: '🇲🇻', name: 'Maldives' },
-                { dial: '223',  code: 'ML', flag: '🇲🇱', name: 'Mali' },
-                { dial: '356',  code: 'MT', flag: '🇲🇹', name: 'Malta' },
-                { dial: '692',  code: 'MH', flag: '🇲🇭', name: 'Marshall Islands' },
-                { dial: '596',  code: 'MQ', flag: '🇲🇶', name: 'Martinique' },
-                { dial: '222',  code: 'MR', flag: '🇲🇷', name: 'Mauritania' },
-                { dial: '230',  code: 'MU', flag: '🇲🇺', name: 'Mauritius' },
-                { dial: '262',  code: 'YT', flag: '🇾🇹', name: 'Mayotte' },
-                { dial: '52',   code: 'MX', flag: '🇲🇽', name: 'Mexico' },
-                { dial: '691',  code: 'FM', flag: '🇫🇲', name: 'Micronesia' },
-                { dial: '373',  code: 'MD', flag: '🇲🇩', name: 'Moldova' },
-                { dial: '377',  code: 'MC', flag: '🇲🇨', name: 'Monaco' },
-                { dial: '976',  code: 'MN', flag: '🇲🇳', name: 'Mongolia' },
-                { dial: '382',  code: 'ME', flag: '🇲🇪', name: 'Montenegro' },
-                { dial: '1664', code: 'MS', flag: '🇲🇸', name: 'Montserrat' },
-                { dial: '212',  code: 'MA', flag: '🇲🇦', name: 'Morocco' },
-                { dial: '258',  code: 'MZ', flag: '🇲🇿', name: 'Mozambique' },
-                { dial: '95',   code: 'MM', flag: '🇲🇲', name: 'Myanmar' },
-                { dial: '264',  code: 'NA', flag: '🇳🇦', name: 'Namibia' },
-                { dial: '674',  code: 'NR', flag: '🇳🇷', name: 'Nauru' },
-                { dial: '977',  code: 'NP', flag: '🇳🇵', name: 'Nepal' },
-                { dial: '31',   code: 'NL', flag: '🇳🇱', name: 'Netherlands' },
-                { dial: '687',  code: 'NC', flag: '🇳🇨', name: 'New Caledonia' },
-                { dial: '64',   code: 'NZ', flag: '🇳🇿', name: 'New Zealand' },
-                { dial: '505',  code: 'NI', flag: '🇳🇮', name: 'Nicaragua' },
-                { dial: '227',  code: 'NE', flag: '🇳🇪', name: 'Niger' },
-                { dial: '234',  code: 'NG', flag: '🇳🇬', name: 'Nigeria' },
-                { dial: '683',  code: 'NU', flag: '🇳🇺', name: 'Niue' },
-                { dial: '47',   code: 'NO', flag: '🇳🇴', name: 'Norway' },
-                { dial: '968',  code: 'OM', flag: '🇴🇲', name: 'Oman' },
-                { dial: '92',   code: 'PK', flag: '🇵🇰', name: 'Pakistan' },
-                { dial: '680',  code: 'PW', flag: '🇵🇼', name: 'Palau' },
-                { dial: '970',  code: 'PS', flag: '🇵🇸', name: 'Palestine' },
-                { dial: '507',  code: 'PA', flag: '🇵🇦', name: 'Panama' },
-                { dial: '675',  code: 'PG', flag: '🇵🇬', name: 'Papua New Guinea' },
-                { dial: '595',  code: 'PY', flag: '🇵🇾', name: 'Paraguay' },
-                { dial: '51',   code: 'PE', flag: '🇵🇪', name: 'Peru' },
-                { dial: '63',   code: 'PH', flag: '🇵🇭', name: 'Philippines' },
-                { dial: '48',   code: 'PL', flag: '🇵🇱', name: 'Poland' },
-                { dial: '351',  code: 'PT', flag: '🇵🇹', name: 'Portugal' },
-                { dial: '1787', code: 'PR', flag: '🇵🇷', name: 'Puerto Rico' },
-                { dial: '974',  code: 'QA', flag: '🇶🇦', name: 'Qatar' },
-                { dial: '262',  code: 'RE', flag: '🇷🇪', name: 'Réunion' },
-                { dial: '40',   code: 'RO', flag: '🇷🇴', name: 'Romania' },
-                { dial: '7',    code: 'RU', flag: '🇷🇺', name: 'Russia' },
-                { dial: '250',  code: 'RW', flag: '🇷🇼', name: 'Rwanda' },
-                { dial: '590',  code: 'BL', flag: '🇧🇱', name: 'Saint Barthélemy' },
-                { dial: '290',  code: 'SH', flag: '🇸🇭', name: 'Saint Helena' },
-                { dial: '1869', code: 'KN', flag: '🇰🇳', name: 'Saint Kitts and Nevis' },
-                { dial: '1758', code: 'LC', flag: '🇱🇨', name: 'Saint Lucia' },
-                { dial: '1784', code: 'VC', flag: '🇻🇨', name: 'Saint Vincent and the Grenadines' },
-                { dial: '685',  code: 'WS', flag: '🇼🇸', name: 'Samoa' },
-                { dial: '378',  code: 'SM', flag: '🇸🇲', name: 'San Marino' },
-                { dial: '239',  code: 'ST', flag: '🇸🇹', name: 'Sao Tome and Principe' },
-                { dial: '966',  code: 'SA', flag: '🇸🇦', name: 'Saudi Arabia' },
-                { dial: '221',  code: 'SN', flag: '🇸🇳', name: 'Senegal' },
-                { dial: '381',  code: 'RS', flag: '🇷🇸', name: 'Serbia' },
-                { dial: '248',  code: 'SC', flag: '🇸🇨', name: 'Seychelles' },
-                { dial: '232',  code: 'SL', flag: '🇸🇱', name: 'Sierra Leone' },
-                { dial: '65',   code: 'SG', flag: '🇸🇬', name: 'Singapore' },
-                { dial: '1721', code: 'SX', flag: '🇸🇽', name: 'Sint Maarten' },
-                { dial: '421',  code: 'SK', flag: '🇸🇰', name: 'Slovakia' },
-                { dial: '386',  code: 'SI', flag: '🇸🇮', name: 'Slovenia' },
-                { dial: '677',  code: 'SB', flag: '🇸🇧', name: 'Solomon Islands' },
-                { dial: '252',  code: 'SO', flag: '🇸🇴', name: 'Somalia' },
-                { dial: '27',   code: 'ZA', flag: '🇿🇦', name: 'South Africa' },
-                { dial: '211',  code: 'SS', flag: '🇸🇸', name: 'South Sudan' },
-                { dial: '34',   code: 'ES', flag: '🇪🇸', name: 'Spain' },
-                { dial: '94',   code: 'LK', flag: '🇱🇰', name: 'Sri Lanka' },
-                { dial: '249',  code: 'SD', flag: '🇸🇩', name: 'Sudan' },
-                { dial: '597',  code: 'SR', flag: '🇸🇷', name: 'Suriname' },
-                { dial: '268',  code: 'SZ', flag: '🇸🇿', name: 'Swaziland' },
-                { dial: '46',   code: 'SE', flag: '🇸🇪', name: 'Sweden' },
-                { dial: '41',   code: 'CH', flag: '🇨🇭', name: 'Switzerland' },
-                { dial: '963',  code: 'SY', flag: '🇸🇾', name: 'Syria' },
-                { dial: '886',  code: 'TW', flag: '🇹🇼', name: 'Taiwan' },
-                { dial: '992',  code: 'TJ', flag: '🇹🇯', name: 'Tajikistan' },
-                { dial: '255',  code: 'TZ', flag: '🇹🇿', name: 'Tanzania' },
-                { dial: '66',   code: 'TH', flag: '🇹🇭', name: 'Thailand' },
-                { dial: '670',  code: 'TL', flag: '🇹🇱', name: 'Timor-Leste' },
-                { dial: '228',  code: 'TG', flag: '🇹🇬', name: 'Togo' },
-                { dial: '690',  code: 'TK', flag: '🇹🇰', name: 'Tokelau' },
-                { dial: '676',  code: 'TO', flag: '🇹🇴', name: 'Tonga' },
-                { dial: '1868', code: 'TT', flag: '🇹🇹', name: 'Trinidad and Tobago' },
-                { dial: '216',  code: 'TN', flag: '🇹🇳', name: 'Tunisia' },
-                { dial: '90',   code: 'TR', flag: '🇹🇷', name: 'Turkey' },
-                { dial: '993',  code: 'TM', flag: '🇹🇲', name: 'Turkmenistan' },
-                { dial: '1649', code: 'TC', flag: '🇹🇨', name: 'Turks and Caicos Islands' },
-                { dial: '688',  code: 'TV', flag: '🇹🇻', name: 'Tuvalu' },
-                { dial: '256',  code: 'UG', flag: '🇺🇬', name: 'Uganda' },
-                { dial: '380',  code: 'UA', flag: '🇺🇦', name: 'Ukraine' },
-                { dial: '971',  code: 'AE', flag: '🇦🇪', name: 'United Arab Emirates' },
-                { dial: '44',   code: 'GB', flag: '🇬🇧', name: 'United Kingdom' },
-                { dial: '1',    code: 'US', flag: '🇺🇸', name: 'United States' },
-                { dial: '598',  code: 'UY', flag: '🇺🇾', name: 'Uruguay' },
-                { dial: '998',  code: 'UZ', flag: '🇺🇿', name: 'Uzbekistan' },
-                { dial: '678',  code: 'VU', flag: '🇻🇺', name: 'Vanuatu' },
-                { dial: '58',   code: 'VE', flag: '🇻🇪', name: 'Venezuela' },
-                { dial: '84',   code: 'VN', flag: '🇻🇳', name: 'Vietnam' },
-                { dial: '1284', code: 'VG', flag: '🇻🇬', name: 'Virgin Islands (British)' },
-                { dial: '1340', code: 'VI', flag: '🇻🇮', name: 'Virgin Islands (US)' },
-                { dial: '681',  code: 'WF', flag: '🇼🇫', name: 'Wallis and Futuna' },
-                { dial: '967',  code: 'YE', flag: '🇾🇪', name: 'Yemen' },
-                { dial: '260',  code: 'ZM', flag: '🇿🇲', name: 'Zambia' },
-                { dial: '263',  code: 'ZW', flag: '🇿🇼', name: 'Zimbabwe' },
-            ];
-        },
-
-        detectCountryFromNumber(number) {
-            if (!number) return null;
-            let clean = String(number).replace(/[^0-9]/g, '');
-
-            // ── Normalize local-format numbers to international ──
-            // Pakistan local: 03xxxxxxxxx  →  923xxxxxxxxx
-            if (clean.startsWith('03') && clean.length >= 10) {
-                clean = '92' + clean.slice(1); // 03xx → 923xx
-            }
-            // Handle 00-prefix international notation: 0092xx → 92xx
-            if (clean.startsWith('00')) {
-                clean = clean.slice(2);
-            }
-
-            // Sort by dial code length descending — longest match wins
-            const sorted = [...this.COUNTRY_DATA].sort((a, b) => b.dial.length - a.dial.length);
-            for (const c of sorted) {
-                if (clean.startsWith(c.dial)) return c;
-            }
-            return null;
-        },
-
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // GEO / FLAG UTILITY (used by screen-outgoing, screen-ringing)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         getCountryFlagAndLocalTime(number) {
-            const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-            if (!number) {
-                return { flag: '🌐', code: '??', time: timeStr };
-            }
+            const n = (number || '').replace(/\s+/g, '');
+            const map = [
+                { prefix: '+92',  code: 'PK', flag: '🇵🇰', tz: 'Asia/Karachi' },
+                { prefix: '0092', code: 'PK', flag: '🇵🇰', tz: 'Asia/Karachi' },
+                { prefix: '03',   code: 'PK', flag: '🇵🇰', tz: 'Asia/Karachi' },
+                { prefix: '3',    code: 'PK', flag: '🇵🇰', tz: 'Asia/Karachi' },
+                { prefix: '+971', code: 'AE', flag: '🇦🇪', tz: 'Asia/Dubai' },
+                { prefix: '+966', code: 'SA', flag: '🇸🇦', tz: 'Asia/Riyadh' },
+                { prefix: '+44',  code: 'GB', flag: '🇬🇧', tz: 'Europe/London' },
+                { prefix: '+1',   code: 'US', flag: '🇺🇸', tz: 'America/New_York' },
+            ];
+            const match = map.find(m => n.startsWith(m.prefix)) || { code: '??', flag: '🌐', tz: null };
+            let time = '';
             try {
-                const country = this.detectCountryFromNumber(number);
-                const flag  = country ? country.flag : '🌐';
-                const code  = country ? country.code : '??';
-                return { flag, code, time: timeStr };
-            } catch (err) {
-                console.error('[Softphone] getCountryFlagAndLocalTime error:', err);
-                return { flag: '🌐', code: '??', time: timeStr };
-            }
-        },
-
-        sendDTMF(digit) {
-            const call = Object.values(this.ziwoActiveCalls)[0];
-            if (call && typeof call.sendDTMF === 'function') {
-                try {
-                    call.sendDTMF(digit);
-                    console.log('[ZIWO SDK] Sent DTMF tone:', digit);
-                } catch (e) {
-                    console.error('[ZIWO SDK] Failed to send DTMF tone:', e);
+                if (match.tz) {
+                    time = new Intl.DateTimeFormat('en', {
+                        timeZone: match.tz, hour: '2-digit', minute: '2-digit', hour12: true
+                    }).format(new Date());
                 }
-            } else {
-                console.log('[ZIWO SDK] Mock DTMF tone keypress:', digit);
-            }
-        },
-
-        handleCallBroadcast(e) {
-            // Live broadcast handler
-            if (e.agent_id && e.agent_id !== {{ auth()->id() }}) return;
-
-            console.log('Call Broadcast received:', e);
-            // Trigger an immediate status check for real-time responsiveness
-            this.phoneCheckStatus();
-        },
-
-        handleAgentBroadcast(e) {
-            if (e.user_id === {{ auth()->id() }}) {
-                // If agent status changed to ringing_inbound, start ring immediately
-                if (e.status === 'ringing_inbound' && this.phoneStatus !== 'ringing_inbound') {
-                    this.phoneStatus = 'ringing_inbound';
-                    if (this.phoneCollapsed) this.togglePhoneCollapse();
-                    this.startRinging();
-                } else if (e.status !== 'ringing_inbound') {
-                    this.stopRinging();
-                    // In SDK mode, the backend status is always stale for in-progress WebRTC calls.
-                    // Only allow status overwrite if not currently in an active SDK call state.
-                    const sdkCallActive = ['ringing', 'ringing_inbound', 'speaking', 'held'].includes(this.phoneStatus);
-                    if (!sdkCallActive) {
-                        this.phoneStatus = e.status;
-                    }
-                }
-                this.phoneCheckStatus();
-            }
-        },
-
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // RING AUDIO — Official ZIWO Ringtone
-        // Uses: https://static.ziwo.io/audio/ringtone.mp3
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-        startRinging() {
-            this.stopRinging(); // Reset any previous playback
-
-            const audioEl = document.getElementById('ring-audio');
-            if (!audioEl) return;
-
-            // Ensure correct src is set (in case element was created without it)
-            if (!audioEl.src || audioEl.src === window.location.href) {
-                audioEl.src = "{{ asset('audio/ringtone.mp3') }}";
-            }
-
-            audioEl.currentTime = 0;
-            audioEl.loop = true;
-            audioEl.volume = 1.0;
-
-            const playPromise = audioEl.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(err => {
-                    // Autoplay was blocked by browser policy — retry on next user interaction
-                    console.warn('Ringtone autoplay blocked. Will retry on next interaction.', err);
-                    const unlockRing = () => {
-                        audioEl.play().catch(() => {});
-                        document.removeEventListener('click', unlockRing);
-                        document.removeEventListener('keydown', unlockRing);
-                    };
-                    document.addEventListener('click', unlockRing, { once: true });
-                    document.addEventListener('keydown', unlockRing, { once: true });
-                });
-            }
-        },
-
-        stopRinging() {
-            const audioEl = document.getElementById('ring-audio');
-            if (audioEl) {
-                audioEl.pause();
-                audioEl.currentTime = 0;
-            }
-        },
-
-        playEndCallTone() {
-            const endCallAudioEl = document.getElementById('end-call-audio');
-            if (endCallAudioEl) {
-                endCallAudioEl.currentTime = 0;
-                endCallAudioEl.volume = 1.0;
-                endCallAudioEl.play().catch(err => {
-                    console.warn('End call tone autoplay blocked:', err);
-                });
-            }
+            } catch(_) {}
+            return { code: match.code, flag: match.flag, time };
         },
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3907,15 +2125,8 @@ window.intakeComponent = function () {
         handleDialerKey(event) {
             if (!event || !event.key) return;
             const validKeys = ['0','1','2','3','4','5','6','7','8','9','*','#','+'];
-            if (validKeys.includes(event.key)) {
-                // Allow native input
-                return;
-            }
-            if (event.key === 'Backspace' || event.key === 'Delete') {
-                // Allow native backspace
-                return;
-            }
-            // Block all other keys (letters, etc.) except control keys
+            if (validKeys.includes(event.key)) return;
+            if (event.key === 'Backspace' || event.key === 'Delete') return;
             if (!event.ctrlKey && !event.metaKey && event.key.length === 1) {
                 event.preventDefault();
             }

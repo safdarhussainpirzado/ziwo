@@ -11,3 +11,4 @@ window.Alpine = Alpine;
 window.Chart = Chart;
 
 Alpine.start();
+// cache-buster: 1784734399

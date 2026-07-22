@@ -109,11 +109,88 @@ export function createMachine() {
   };
 
   const transition = (event) => {
-    const t = event.type;
+    let t = event.type;
+
+    if (t === EVENTS.SDK_EVENT) {
+      const kind = event.kind;
+      const call = event.call;
+      const callId = call?.id;
+
+      if (kind === 'requesting' || kind === 'trying' || kind === 'early' || kind === 'active') {
+        if (callId && ctx.activeCallId && ctx.activeCallId !== callId) {
+          // Relink temporary call record to real SDK Call ID
+          const oldId = ctx.activeCallId;
+          if (ctx.calls[oldId]) {
+            ctx.calls[callId] = { ...ctx.calls[oldId], id: callId };
+            delete ctx.calls[oldId];
+          } else {
+            ctx.calls[callId] = {
+              id: callId, number: call.number || '', name: call.name || '',
+              direction: call.direction || 'outbound', isHeld: false, isMuted: false, startedAt: Date.now()
+            };
+          }
+          ctx.activeCallId = callId;
+        }
+      }
+
+      // Rewrite SDK event kind to standard machine event
+      if (kind === 'active' || kind === 'answering') {
+        t = EVENTS.REMOTE_ANSWERED;
+      } else if (kind === 'ringing' || kind === 'invite' || kind === 'attach') {
+        // Detect inbound vs outbound:
+        // ZIWO SDK may not always include a `direction` field.
+        // If we're in READY state (not dialing), treat any ringing as inbound.
+        // If we're in DIALING state, it's the remote party ringing (outbound confirmation).
+        const isExplicitlyInbound = call?.direction === 'inbound'
+          || event.direction === 'inbound'
+          || call?.incoming === true;
+        const isExplicitlyOutbound = call?.direction === 'outbound'
+          || state === STATES.DIALING || state === STATES.CONNECTING;
+
+        if (isExplicitlyInbound || (!isExplicitlyOutbound && state === STATES.READY)) {
+          t = EVENTS.INCOMING;
+          event.callId = callId;
+          // Pull caller number from any possible ZIWO SDK field
+          event.number = call?.number
+            || call?.callerNumber
+            || call?.callerIdNumber
+            || call?.phoneNumber
+            || event.number || '';
+          event.name = call?.name
+            || call?.callerIdName
+            || call?.displayName
+            || event.name || '';
+        }
+        // If it's outbound ringing we just drop it (DIALING state already shows the screen)
+      } else if (kind === 'hangup' || kind === 'destroy') {
+        t = EVENTS.REMOTE_HANGUP;
+      } else if (kind === 'held') {
+        t = EVENTS.HOLD;
+      } else if (kind === 'unheld') {
+        t = EVENTS.UNHOLD;
+      } else if (kind === 'mute') {
+        t = EVENTS.MUTE;
+      } else if (kind === 'unmute') {
+        t = EVENTS.UNMUTE;
+      } else if (kind === 'connected') {
+        // SDK connected = WebRTC session established; if in dialing, treat as answered
+        if (state === STATES.DIALING || state === STATES.CONNECTING) {
+          t = EVENTS.REMOTE_ANSWERED;
+        }
+      }
+    }
+
+    // Global: AUTH_FAIL from any state resets to idle
+    if (t === EVENTS.AUTH_FAIL && state !== STATES.IDLE) {
+      return set(STATES.IDLE, () => {
+        ctx = initialContext();
+      });
+    }
 
     switch (state) {
       case STATES.IDLE: {
         if (t === EVENTS.AUTH_OK) return set(STATES.READY, () => { ctx.auth = event.auth || true; });
+        if (t === EVENTS.AUTH_FAIL) return; // already idle
         if (t === EVENTS.ERROR) return set(STATES.IDLE, () => { ctx.error = event.msg; });
         break;
       }
@@ -149,10 +226,14 @@ export function createMachine() {
             effects.push(() => ctx._adapter?.answer?.(ctx.activeCallId));
           });
         }
-        if (t === EVENTS.REJECT || t === EVENTS.REMOTE_HANGUP) {
+        if (t === EVENTS.REJECT || t === EVENTS.REMOTE_HANGUP || t === EVENTS.HANGUP_ALL) {
           return set(STATES.READY, () => {
             const id = ctx.activeCallId;
-            if (t === EVENTS.REJECT) effects.push(() => ctx._adapter?.reject?.(id));
+            // reject() for a still-ringing call, hangup() for answered/ambiguous
+            effects.push(() => {
+              try { ctx._adapter?.reject?.(id); } catch(_) {}
+              try { ctx._adapter?.hangup?.(id); } catch(_) {}
+            });
             delete ctx.calls[id];
             resetCallRefs();
           });
@@ -162,7 +243,7 @@ export function createMachine() {
 
       case STATES.DIALING: {
         if (t === EVENTS.REMOTE_ANSWERED) return set(STATES.IN_CALL_ACTIVE);
-        if (t === EVENTS.REMOTE_HANGUP || t === EVENTS.REJECT || t === EVENTS.CANCEL_TRANSFER) {
+        if (t === EVENTS.REMOTE_HANGUP || t === EVENTS.REJECT || t === EVENTS.CANCEL_TRANSFER || t === EVENTS.HANGUP_ALL) {
           return set(STATES.READY, () => {
             const id = ctx.activeCallId;
             effects.push(() => ctx._adapter?.hangup?.(id));
@@ -207,6 +288,16 @@ export function createMachine() {
             effects.push(() => ctx._adapter?.addParticipant?.(event.number, ctx.conferenceRoomId));
           });
         }
+        if (t === EVENTS.MUTE) {
+          if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = true;
+          effects.push(() => ctx._adapter?.mute?.(ctx.activeCallId));
+          return set(STATES.IN_CALL_ACTIVE);
+        }
+        if (t === EVENTS.UNMUTE) {
+          if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = false;
+          effects.push(() => ctx._adapter?.unmute?.(ctx.activeCallId));
+          return set(STATES.IN_CALL_ACTIVE);
+        }
         if (t === EVENTS.HANGUP_ALL) {
           return set(STATES.READY, () => {
             const id = ctx.activeCallId;
@@ -224,6 +315,16 @@ export function createMachine() {
             if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isHeld = false;
             effects.push(() => ctx._adapter?.unhold?.(ctx.activeCallId));
           });
+        }
+        if (t === EVENTS.MUTE) {
+          if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = true;
+          effects.push(() => ctx._adapter?.mute?.(ctx.activeCallId));
+          return set(STATES.IN_CALL_HELD);
+        }
+        if (t === EVENTS.UNMUTE) {
+          if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = false;
+          effects.push(() => ctx._adapter?.unmute?.(ctx.activeCallId));
+          return set(STATES.IN_CALL_HELD);
         }
         if (t === EVENTS.ADD_PARTICIPANT) {
           return set(STATES.CONFERENCE_ACTIVE, () => {

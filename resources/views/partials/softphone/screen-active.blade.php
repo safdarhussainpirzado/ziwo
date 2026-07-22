@@ -147,4 +147,57 @@
             <span>End Call</span>
         </button>
     </div>
+
+    {{-- ── DTMF KEYPAD OVERLAY ──────────────────────────────────────────────
+         Slides up from bottom when keypadPanelOpen is true.
+         Provides in-call digit entry (IVR, voicemail PIN, etc.)
+    --}}
+    <template x-if="keypadPanelOpen">
+        <div class="absolute inset-0 bg-[#0B1220]/98 flex flex-col z-40"
+             x-transition:enter="transition ease-out duration-200 transform"
+             x-transition:enter-start="opacity-0 translate-y-4"
+             x-transition:enter-end="opacity-100 translate-y-0"
+             x-transition:leave="transition ease-in duration-150 transform"
+             x-transition:leave-start="opacity-100 translate-y-0"
+             x-transition:leave-end="opacity-0 translate-y-4">
+
+            {{-- Header --}}
+            <div class="shrink-0 h-12 px-4 border-b border-slate-800 flex items-center justify-between">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-slate-300">Keypad</span>
+                <button type="button" @click="keypadPanelOpen = false; dtmfInput = ''"
+                        class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition grid place-items-center">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+            </div>
+
+            {{-- DTMF input display --}}
+            <div class="shrink-0 px-6 py-3 text-center">
+                <div class="font-mono text-2xl font-bold text-white tracking-[0.3em] min-h-[2.5rem]"
+                     x-text="dtmfInput || '&nbsp;'">&nbsp;</div>
+            </div>
+
+            {{-- Digit grid --}}
+            <div class="flex-1 grid grid-cols-3 gap-3 px-8 pb-4 content-center">
+                <template x-for="key in ['1','2','3','4','5','6','7','8','9','*','0','#']" :key="key">
+                    <button type="button"
+                            @click="phoneSendDtmf(key)"
+                            class="h-14 rounded-2xl bg-slate-800/70 border border-slate-700 hover:bg-indigo-600 hover:border-indigo-500 text-white font-bold text-lg transition active:scale-95 shadow-sm"
+                            x-text="key">
+                    </button>
+                </template>
+            </div>
+
+            {{-- Clear + End --}}
+            <div class="shrink-0 px-6 pb-5 flex gap-3">
+                <button type="button" @click="dtmfInput = dtmfInput.slice(0, -1)"
+                        class="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-sm font-bold transition">
+                    <i class="fa-solid fa-delete-left mr-1"></i> Delete
+                </button>
+                <button type="button" @click="phoneHangup()"
+                        class="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition">
+                    <i class="fa-solid fa-phone-slash mr-1"></i> End
+                </button>
+            </div>
+        </div>
+    </template>
 </div>

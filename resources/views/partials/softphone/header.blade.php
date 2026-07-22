@@ -74,7 +74,6 @@
             <option value="meeting">Meeting</option>
             <option value="break">On Break</option>
             <option value="outgoing">Outgoing</option>
-            <option value="offline">Offline</option>
         </select>
 
         <button
