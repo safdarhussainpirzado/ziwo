@@ -60,7 +60,7 @@
         </template>
 
         {{-- Outgoing ringing (violet screen) --}}
-        <template x-if="phoneAuthenticated && ['ringing_outbound', 'ringing'].includes(phoneStatus) && (currentCall.direction === 'outbound' || !currentCall.direction)">
+        <template x-if="phoneAuthenticated && ['ringing_outbound', 'ringing'].includes(phoneStatus) && currentCall.direction === 'outbound'">
             <section class="absolute inset-0"
                      x-transition:enter="transition ease-out duration-250"
                      x-transition:enter-start="opacity-0 scale-95"

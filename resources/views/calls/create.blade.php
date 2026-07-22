@@ -2088,16 +2088,13 @@ window.intakeComponent = function () {
                     // Only update currentCall.id for genuine new outbound calls,
                     // not for SDK-internal resume sequences
                     if (!this.isConferenceResuming) {
-                        // Accept transition from online→ringing (outbound)
-                        // and ringing_inbound→ringing (rare inbound→outbound handoff)
-                        if (this.phoneStatus === 'online' || this.phoneStatus === 'ringing_inbound') {
-                            this.currentCall.id = call.callId;
-                            this.currentCall.uuid = call.callId;
-                            this.phoneStatus = 'ringing';
-                        }
+                        // Accept transition from online, speaking, active, held to ringing
+                        this.currentCall.id = call.callId;
+                        this.currentCall.uuid = call.callId;
+                        this.phoneStatus = 'ringing';
                     }
                 } else {
-                    if (!this.isConferenceResuming && (this.phoneStatus === 'online' || this.phoneStatus === 'ringing_inbound')) this.phoneStatus = 'ringing';
+                    if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
                 }
                 console.log('[ZIWO SDK] ziwo-requesting');
             });
@@ -2106,28 +2103,24 @@ window.intakeComponent = function () {
                 if (call) {
                     this.ziwoActiveCalls[call.callId] = call;
                     if (!this.isConferenceResuming) {
-                        if ((this.phoneStatus === 'online' || this.phoneStatus === 'ringing_inbound') || !this.currentCall.id) {
-                            this.currentCall.id = this.currentCall.id || call.callId;
-                            this.currentCall.uuid = this.currentCall.uuid || call.callId;
-                        }
+                        this.currentCall.id = this.currentCall.id || call.callId;
+                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
                     }
                 }
                 console.log('[ZIWO SDK] ziwo-trying');
-                if (!this.isConferenceResuming && (this.phoneStatus === 'online' || this.phoneStatus === 'ringing_inbound')) this.phoneStatus = 'ringing';
+                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
             });
             window.addEventListener('ziwo-early', (e) => {
                 const call = e.detail?.call;
                 if (call) {
                     this.ziwoActiveCalls[call.callId] = call;
                     if (!this.isConferenceResuming) {
-                        if ((this.phoneStatus === 'online' || this.phoneStatus === 'ringing_inbound') || !this.currentCall.id) {
-                            this.currentCall.id = this.currentCall.id || call.callId;
-                            this.currentCall.uuid = this.currentCall.uuid || call.callId;
-                        }
+                        this.currentCall.id = this.currentCall.id || call.callId;
+                        this.currentCall.uuid = this.currentCall.uuid || call.callId;
                     }
                 }
                 console.log('[ZIWO SDK] ziwo-early — call is ringing on remote side');
-                if (!this.isConferenceResuming && (this.phoneStatus === 'online' || this.phoneStatus === 'ringing_inbound')) this.phoneStatus = 'ringing';
+                if (!this.isConferenceResuming) this.phoneStatus = 'ringing';
             });
 
             // ── ACTIVE: call connected / answered ─────────────────────────
