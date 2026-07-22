@@ -17,12 +17,14 @@ Alpine.store('softphone', {
   context:  {},
   // Convenience booleans for partials
   authenticated: false,
-  status:   'offline',     // 'offline'|'online'|'ringing_inbound'|'ringing_outbound'|'active'|'held'
+  status:   'offline',     // 'offline'|'online'|'ringing_inbound'|'ringing_outbound'|'active'|'held'|'conference'
   currentCall: {
     id: null, caller_number: '', caller_name: '',
     is_held: false, is_muted: false, recording_paused: false,
     duration: 0, direction: null,
   },
+  participants: [],             // conference participants
+  conferenceDialingNumber: null, // number being dialed for new conference participant
   // Expose send so intakeComponent can drive the machine
   send: null,
 });
@@ -87,11 +89,21 @@ Alpine.data('softphone', () => {
   // Sync machine state into Alpine.store so intakeComponent can read it
   function syncStore(state, ctx) {
     const store = Alpine.store('softphone');
-    store.state       = state;
-    store.context     = ctx;
-    store.status      = machineStateToStatus(state, ctx);
+    store.state        = state;
+    store.context      = ctx;
+    store.status       = machineStateToStatus(state, ctx);
     store.authenticated = state !== 'idle';
-    store.currentCall = ctxToCurrentCall(ctx);
+    store.currentCall  = ctxToCurrentCall(ctx);
+    store.conferenceDialingNumber = ctx.conferenceDialingNumber || null;
+    // Expose participants list for conference UI
+    store.participants = (ctx.participants || []).map(p => ({
+      id:      p.id,
+      number:  p.number || '',
+      name:    p.name   || '',
+      isHeld:  p.isHeld || false,
+      isMuted: p.isMuted || false,
+      heldAt:  p.heldAt || null,
+    }));
   }
 
   // Forward SDK window events into the machine

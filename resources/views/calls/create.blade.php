@@ -892,6 +892,7 @@ window.intakeComponent = function () {
         phoneSubmitting: false,
         phoneStatus: 'offline', // offline, online, ringing, speaking, active, held, ringing_inbound
         phoneAgentStatus: 'offline', // agent presence/availability (Ziwo PBX): available|meeting|break|outgoing|offline
+                                      // Stays 'offline' until login succeeds
         phoneUpdatingStatus: false,
         get phoneCallActive() {
             return ['ringing', 'active', 'held', 'speaking', 'ringing_inbound'].includes(this.phoneStatus);
@@ -1139,6 +1140,7 @@ window.intakeComponent = function () {
 
         // Conference merged participants once connected
         conferenceParticipants: [], // [{number, name, flag, duration}]
+        conferenceDialingNumber: null, // number being called for new conference leg (shows dialing badge)
 
         ziwoTeammates: [],
         ziwoQueues: [],
@@ -1683,6 +1685,22 @@ window.intakeComponent = function () {
                 this.currentCall = { id: null, uuid: null, caller_number: '', caller_name: '', is_held: false, is_muted: false, recording_paused: false, duration: 0 };
             }
 
+            // Sync conference participants → heldParticipants
+            if (s.participants && s.participants.length > 0) {
+                this.heldParticipants = s.participants.map(p => ({
+                    id:     p.id,
+                    number: p.number || '',
+                    name:   p.name   || '',
+                    isHeld: p.isHeld || false,
+                    heldAt: p.heldAt || null,
+                }));
+            } else if (this.phoneStatus === 'online' || this.phoneStatus === 'offline') {
+                this.heldParticipants = [];
+            }
+
+            // Sync conference dialing indicator
+            this.conferenceDialingNumber = s.conferenceDialingNumber || null;
+
             // Manage call timer transitions
             const IN_CALL_STATUSES = ['active', 'speaking', 'held', 'conference', 'transfer_consulting'];
             const nowActive = IN_CALL_STATUSES.includes(this.phoneStatus);
@@ -1904,9 +1922,9 @@ window.intakeComponent = function () {
             this.transferType = 'blind';
             this.transferTarget = '';
             this.inlineTransferOpen = true;
-            // Load teammates for quick-select
-            if (!this.teammates || this.teammates.length === 0) this.phoneLoadTeammates();
-            if (!this.queues || this.queues.length === 0) this.phoneLoadQueues();
+            // Load data for quick-select using correct variable names
+            if (!this.ziwoTeammates || this.ziwoTeammates.length === 0) this.phoneLoadTeammates();
+            if (!this.ziwoQueues || this.ziwoQueues.length === 0) this.phoneLoadQueues();
         },
 
         openAddOrCallPanel() {

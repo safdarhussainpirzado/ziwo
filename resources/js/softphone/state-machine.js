@@ -294,6 +294,7 @@ export function createMachine() {
           return set(STATES.CONFERENCE_ACTIVE, () => {
             onConferenceEnter();
             if (!ctx.conferenceRoomId) ctx.conferenceRoomId = ctx.activeCallId;
+            ctx.conferenceDialingNumber = event.number || null;
             effects.push(() => ctx._adapter?.addParticipant?.(event.number, ctx.conferenceRoomId));
           });
         }
@@ -339,6 +340,7 @@ export function createMachine() {
           return set(STATES.CONFERENCE_ACTIVE, () => {
             onConferenceEnter();
             if (!ctx.conferenceRoomId) ctx.conferenceRoomId = ctx.activeCallId;
+            ctx.conferenceDialingNumber = event.number || null;
             effects.push(() => ctx._adapter?.addParticipant?.(event.number, ctx.conferenceRoomId));
           });
         }
@@ -396,6 +398,7 @@ export function createMachine() {
             if (!ctx.participants.find((p) => p.id === event.participant.id)) {
               ctx.participants.push(event.participant);
             }
+            ctx.conferenceDialingNumber = null; // clear dialing indicator
           });
         }
         if (t === EVENTS.PARTICIPANT_LEFT || t === EVENTS.REMOVE_PARTICIPANT) {
@@ -437,6 +440,7 @@ export function createMachine() {
         }
         if (t === EVENTS.ADD_PARTICIPANT) {
           if (!ctx.conferenceRoomId) ctx.conferenceRoomId = ctx.activeCallId;
+          ctx.conferenceDialingNumber = event.number || null;
           effects.push(() => ctx._adapter?.addParticipant?.(event.number, ctx.conferenceRoomId));
           return set(state);
         }

@@ -6,21 +6,21 @@
 
     {{-- LEFT: avatar + agent label --}}
     <div class="flex items-center gap-2.5 min-w-0">
-        {{-- Avatar circle: gradient based on presence --}}
+        {{-- Avatar circle: gradient based on presence (grey when offline/not authed) --}}
         <div class="relative shrink-0">
             <div class="w-9 h-9 rounded-full grid place-items-center text-[11px] font-black text-white shadow-lg"
                  :class="{
-                     'bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-emerald-500/30': phoneAgentStatus === 'available',
-                     'bg-gradient-to-br from-amber-500 to-amber-600 shadow-amber-500/30':  phoneAgentStatus === 'break',
-                     'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-500/30':     phoneAgentStatus === 'meeting',
-                     'bg-gradient-to-br from-violet-500 to-violet-600 shadow-violet-500/30': phoneAgentStatus === 'outgoing',
-                     'bg-gradient-to-br from-slate-600 to-slate-700':                       phoneAgentStatus === 'offline' || !phoneAgentStatus
+                     'bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-emerald-500/30': phoneAuthenticated && phoneAgentStatus === 'available',
+                     'bg-gradient-to-br from-amber-500 to-amber-600 shadow-amber-500/30':  phoneAuthenticated && phoneAgentStatus === 'break',
+                     'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-500/30':     phoneAuthenticated && phoneAgentStatus === 'meeting',
+                     'bg-gradient-to-br from-violet-500 to-violet-600 shadow-violet-500/30': phoneAuthenticated && phoneAgentStatus === 'outgoing',
+                     'bg-gradient-to-br from-slate-600 to-slate-700': !phoneAuthenticated || phoneAgentStatus === 'offline'
                  }">
                 <span x-text="(ziwoUsername || 'JD').slice(0,2).toUpperCase()"></span>
             </div>
-            {{-- Active connection dot --}}
+            {{-- Active connection dot — only shown when authenticated and non-offline --}}
             <span
-                x-show="phoneAuthenticated && phoneStatus !== 'offline'"
+                x-show="phoneAuthenticated && phoneAgentStatus !== 'offline'"
                 class="absolute -bottom-0.5 -right-0.5 block w-3 h-3 rounded-full border-2 border-[#0B1220]"
                 :class="{
                     'bg-emerald-500 animate-pulse': phoneAgentStatus === 'available',
@@ -34,23 +34,23 @@
         {{-- Agent name + presence label --}}
         <div class="min-w-0">
             <div class="text-[11px] font-bold uppercase tracking-wider text-slate-100 truncate leading-tight">
-                <span x-text="(ziwoUsername || 'Agent').split('@')[0]"></span>
+                <span x-text="phoneAuthenticated ? (ziwoUsername || 'Agent').split('@')[0] : 'Sign In'"></span>
             </div>
             <div class="text-[9px] font-semibold uppercase tracking-wider leading-tight mt-0.5"
                  :class="{
-                     'text-emerald-400': phoneAgentStatus === 'available',
-                     'text-amber-400':   phoneAgentStatus === 'break',
-                     'text-blue-400':     phoneAgentStatus === 'meeting',
-                     'text-violet-400':   phoneAgentStatus === 'outgoing',
-                     'text-slate-500':    phoneAgentStatus === 'offline'
+                     'text-emerald-400': phoneAuthenticated && phoneAgentStatus === 'available',
+                     'text-amber-400':   phoneAuthenticated && phoneAgentStatus === 'break',
+                     'text-blue-400':     phoneAuthenticated && phoneAgentStatus === 'meeting',
+                     'text-violet-400':   phoneAuthenticated && phoneAgentStatus === 'outgoing',
+                     'text-slate-500':    !phoneAuthenticated || phoneAgentStatus === 'offline'
                  }">
-                <span x-text="{
+                <span x-text="phoneAuthenticated ? ({
                     'available': '● Available',
                     'break':     '☕ On Break',
                     'meeting':   '📅 In Meeting',
-                    'outgoing':   '📞 Outgoing',
-                    'offline':    '○ Offline'
-                }[phoneAgentStatus] || '○ ' + phoneAgentStatus"></span>
+                    'outgoing':  '📞 Outgoing',
+                    'offline':   '○ Offline'
+                }[phoneAgentStatus] || '○ ' + phoneAgentStatus) : '○ Offline'"></span>
             </div>
         </div>
     </div>

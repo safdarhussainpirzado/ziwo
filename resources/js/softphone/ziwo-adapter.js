@@ -184,19 +184,43 @@ export function createAdapter({ baseUrl = '/telephony' } = {}) {
 
     mute: async (callId) => {
       console.log('[softphone-adapter] Muting:', callId);
+      // Try SDK-level mute first (most reliable)
+      if (sdkClient) {
+        try {
+          if (typeof sdkClient.muteActiveCall === 'function') { sdkClient.muteActiveCall(); }
+          else if (typeof sdkClient.mute === 'function') { sdkClient.mute(); }
+        } catch(_) {}
+      }
+      // Also try call-level mute
       const call = getCallInstance(callId);
       if (call && typeof call.mute === 'function') {
         try { call.mute(); } catch(_) {}
       }
+      // Final fallback: mute the microphone track directly
+      try {
+        const streams = Object.values(activeCalls).map(c => c.stream || c.localStream).filter(Boolean);
+        streams.forEach(stream => stream.getAudioTracks().forEach(t => { t.enabled = false; }));
+      } catch(_) {}
       return post(baseUrl, '/mute', { call_id: callId });
     },
 
     unmute: async (callId) => {
       console.log('[softphone-adapter] Unmuting:', callId);
+      if (sdkClient) {
+        try {
+          if (typeof sdkClient.unmuteActiveCall === 'function') { sdkClient.unmuteActiveCall(); }
+          else if (typeof sdkClient.unmute === 'function') { sdkClient.unmute(); }
+        } catch(_) {}
+      }
       const call = getCallInstance(callId);
       if (call && typeof call.unmute === 'function') {
         try { call.unmute(); } catch(_) {}
       }
+      // Re-enable microphone track
+      try {
+        const streams = Object.values(activeCalls).map(c => c.stream || c.localStream).filter(Boolean);
+        streams.forEach(stream => stream.getAudioTracks().forEach(t => { t.enabled = true; }));
+      } catch(_) {}
       return post(baseUrl, '/unmute', { call_id: callId });
     },
 
