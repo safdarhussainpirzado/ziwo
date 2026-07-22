@@ -43,6 +43,7 @@ export const EVENTS = {
   COMPLETE_TRANSFER: 'COMPLETE_TRANSFER',
   CANCEL_TRANSFER: 'CANCEL_TRANSFER',
   ADD_PARTICIPANT: 'ADD_PARTICIPANT',
+  BLIND_TRANSFER: 'BLIND_TRANSFER',
   PARTICIPANT_JOINED: 'PARTICIPANT_JOINED',
   PARTICIPANT_LEFT: 'PARTICIPANT_LEFT',
   HOLD_PARTICIPANT: 'HOLD_PARTICIPANT',
@@ -279,6 +280,14 @@ export function createMachine() {
             ctx.transfer = { consultCallId, originalCallId };
             if (ctx.calls[originalCallId]) ctx.calls[originalCallId].isHeld = true;
             effects.push(() => ctx._adapter?.attendedStart?.(originalCallId, event.number));
+          });
+        }
+        if (t === EVENTS.BLIND_TRANSFER) {
+          return set(STATES.READY, () => {
+            const id = ctx.activeCallId;
+            effects.push(() => ctx._adapter?.blindTransfer?.(id, event.number || event.callId));
+            delete ctx.calls[id];
+            resetCallRefs();
           });
         }
         if (t === EVENTS.ADD_PARTICIPANT) {

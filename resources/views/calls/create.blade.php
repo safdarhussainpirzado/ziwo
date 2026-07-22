@@ -1112,6 +1112,11 @@ window.intakeComponent = function () {
         transferSearch: '',
         dtmfInput: '',
 
+        // ─── Inline Transfer Panel ───────────────────────────────────────
+        inlineTransferOpen: false,
+        transferType: 'blind',   // 'blind' | 'attended'
+        transferTarget: '',      // number/extension to transfer to
+
         // ─── Add or Call Panel (Conference / Add Participant) ───
         addOrCallOpen: false,
         addOrCallTab: 'phonebook',   // 'phonebook' | 'teammates' | 'queues'
@@ -1598,9 +1603,14 @@ window.intakeComponent = function () {
                     if (data?.is_authenticated) {
                         // Server confirms session is valid
                         this.phoneAuthenticated = true;
-                        this.phoneStatus = data.agent_status === 'online' ? 'online' : (data.agent_status || 'online');
+                        this.phoneStatus = 'online';
+                        // Set agent presence — backend returns e.g. 'online', map to our 4-state
+                        const rawStatus = data.agent_status || data.presence || 'online';
+                        this.phoneAgentStatus = this.mapZiwoAgentStatus(rawStatus);
                         this.ziwoUsername = data.ziwo_username || this.ziwoUsername;
                         try { localStorage.setItem('ziwo_auth', JSON.stringify({ authenticated: true, username: this.ziwoUsername })); } catch(_) {}
+                        // Also signal the state machine
+                        Alpine.store('softphone')?.send?.({ type: 'AUTH_OK', auth: data });
                         this.$nextTick(() => {
                             this.phoneLoadRecentLogs();
                             this.phoneSearchContacts();
@@ -1612,6 +1622,7 @@ window.intakeComponent = function () {
                         try { localStorage.removeItem('ziwo_auth'); } catch(_) {}
                         this.phoneAuthenticated = false;
                         this.phoneStatus = 'offline';
+                        this.phoneAgentStatus = 'offline';
                         this.phoneCollapsed = false; // make sure panel is open to show login
                     }
                 })
@@ -1673,10 +1684,11 @@ window.intakeComponent = function () {
             }
 
             // Manage call timer transitions
-            const nowActive = (this.phoneStatus === 'active' || this.phoneStatus === 'speaking');
-            const wasActive = (prevStatus === 'active' || prevStatus === 'speaking');
+            const IN_CALL_STATUSES = ['active', 'speaking', 'held', 'conference', 'transfer_consulting'];
+            const nowActive = IN_CALL_STATUSES.includes(this.phoneStatus);
+            const wasActive = IN_CALL_STATUSES.includes(prevStatus);
             if (nowActive && !wasActive) {
-                // Just went active — start timer
+                // Just went active — start timer, stop ringing
                 this.startCallTimer?.();
                 this.stopRinging?.();
             } else if (!nowActive && wasActive) {
@@ -1853,34 +1865,34 @@ window.intakeComponent = function () {
         },
 
         // ── Transfer actions ─────────────────────────────────────────────────
-        phoneExecuteTransfer(type = 'blind', number = null) {
-            const n = number || this.transferNumber?.trim();
+        phoneExecuteTransfer() {
+            const n = (this.transferTarget || '').trim();
             if (!n) return;
+            const callId = this.currentCall.id;
+            const type = this.transferType || 'blind';
+
             if (type === 'blind') {
-                fetch('/telephony/transfer', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
-                    },
-                    body: JSON.stringify({ number: n, type: 'blind', call_id: this.currentCall.id }),
-                }).then(() => {
-                    Alpine.store('softphone').send?.({ type: 'REMOTE_HANGUP' });
-                }).catch(() => {});
+                // Blind transfer: send via state machine which calls adapter.blindTransfer()
+                Alpine.store('softphone').send?.({ type: 'BLIND_TRANSFER', number: n, callId });
             } else {
+                // Attended (warm) transfer: start consult call
                 Alpine.store('softphone').send?.({ type: 'START_TRANSFER', number: n });
+                this.attendedTransferPending = true;
             }
-            this.transferPanelOpen = false;
-            this.transferNumber = '';
+
+            this.inlineTransferOpen = false;
+            this.transferTarget = '';
         },
 
         phoneCancelAttendedTransfer() {
-            Alpine.store('softphone').send?.({ type: 'CANCEL_TRANSFER' });
-            this.transferPanelOpen = false;
+            Alpine.store('softphone').send?.({ type: 'CANCEL_TRANSFER', callId: this.currentCall.id });
+            this.attendedTransferPending = false;
+            this.inlineTransferOpen = false;
         },
 
-        phoneResumeHeldParticipant(participantId) {
-            Alpine.store('softphone').send?.({ type: 'RESUME_PARTICIPANT', participantId });
+        phoneResumeHeldParticipant(participant) {
+            const id = participant?.id || participant;
+            Alpine.store('softphone').send?.({ type: 'RESUME_PARTICIPANT', participantId: id });
         },
 
         // ── UI helpers ───────────────────────────────────────────────────────
@@ -1889,10 +1901,12 @@ window.intakeComponent = function () {
         },
 
         openInlineTransfer() {
-            this.transferTab = 'manual';
-            this.transferSearch = '';
-            this.transferNumber = '';
-            this.transferPanelOpen = true;
+            this.transferType = 'blind';
+            this.transferTarget = '';
+            this.inlineTransferOpen = true;
+            // Load teammates for quick-select
+            if (!this.teammates || this.teammates.length === 0) this.phoneLoadTeammates();
+            if (!this.queues || this.queues.length === 0) this.phoneLoadQueues();
         },
 
         openAddOrCallPanel() {

@@ -35,15 +35,18 @@ Alpine.data('softphone', () => {
 
   // Map machine state → legacy phoneStatus strings so partials work unchanged
   function machineStateToStatus(state, ctx) {
-    if (state === 'idle')              return 'offline';
-    if (state === 'ready')             return 'online';
-    if (state === 'incoming')          return 'ringing_inbound';
-    if (state === 'dialing')           return 'ringing_outbound';
-    if (state === 'connecting')        return 'ringing_outbound';
-    if (state === 'inCall.active')     return 'active';
-    if (state === 'inCall.held')       return 'held';
-    if (state.startsWith('transfer'))  return 'active';
-    if (state.startsWith('conference'))return 'active';
+    if (state === 'idle')                     return 'offline';
+    if (state === 'ready')                    return 'online';
+    if (state === 'incoming')                 return 'ringing_inbound';
+    if (state === 'dialing')                  return 'ringing_outbound';
+    if (state === 'connecting')               return 'ringing_outbound';
+    if (state === 'inCall.active')            return 'active';
+    if (state === 'inCall.held')              return 'held';
+    if (state === 'transferConsulting')       return 'transfer_consulting';
+    if (state === 'conferenceActive')         return 'conference';
+    if (state === 'conferenceHeld')           return 'conference';
+    if (state.startsWith('transfer'))         return 'active';
+    if (state.startsWith('conference'))       return 'conference';
     return 'online';
   }
 

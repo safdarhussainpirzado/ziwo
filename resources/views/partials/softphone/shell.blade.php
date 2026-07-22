@@ -49,8 +49,8 @@
             </section>
         </template>
 
-        {{-- Ringing (inbound only) --}}
-        <template x-if="phoneAuthenticated && ['ringing_inbound', 'ringing'].includes(phoneStatus) && currentCall.direction === 'inbound'">
+        {{-- Ringing inbound --}}
+        <template x-if="phoneAuthenticated && phoneStatus === 'ringing_inbound'">
             <section class="absolute inset-0"
                      x-transition:enter="transition ease-out duration-250"
                      x-transition:enter-start="opacity-0 scale-95"
@@ -59,8 +59,8 @@
             </section>
         </template>
 
-        {{-- Outgoing ringing (violet screen) --}}
-        <template x-if="phoneAuthenticated && ['ringing_outbound', 'ringing'].includes(phoneStatus) && currentCall.direction === 'outbound'">
+        {{-- Outgoing ringing --}}
+        <template x-if="phoneAuthenticated && phoneStatus === 'ringing_outbound'">
             <section class="absolute inset-0"
                      x-transition:enter="transition ease-out duration-250"
                      x-transition:enter-start="opacity-0 scale-95"
@@ -69,28 +69,8 @@
             </section>
         </template>
 
-        {{-- Transfer overlay --}}
-        <template x-if="phoneAuthenticated && transferPanelOpen">
-            <section class="absolute inset-0 z-30"
-                     x-transition:enter="transition ease-out duration-200"
-                     x-transition:enter-start="opacity-0 translate-y-2"
-                     x-transition:enter-end="opacity-100 translate-y-0">
-                @include('partials.softphone.screen-transfer')
-            </section>
-        </template>
-
-        {{-- Add participant overlay --}}
-        <template x-if="phoneAuthenticated && addOrCallOpen">
-            <section class="absolute inset-0 z-30"
-                     x-transition:enter="transition ease-out duration-200"
-                     x-transition:enter-start="opacity-0 translate-y-2"
-                     x-transition:enter-end="opacity-100 translate-y-0">
-                @include('partials.softphone.screen-add')
-            </section>
-        </template>
-
-        {{-- Active call --}}
-        <template x-if="phoneAuthenticated && ['active','speaking'].includes(phoneStatus) && !transferPanelOpen && !addOrCallOpen">
+        {{-- Active call (covers: active, held, conference, transfer_consulting) --}}
+        <template x-if="phoneAuthenticated && ['active','speaking','held','conference','transfer_consulting'].includes(phoneStatus)">
             <section class="absolute inset-0"
                      x-transition:enter="transition ease-out duration-200"
                      x-transition:enter-start="opacity-0 translate-y-2"
@@ -99,20 +79,9 @@
             </section>
         </template>
 
-        {{-- Held --}}
-        <template x-if="phoneAuthenticated && phoneStatus === 'held' && !transferPanelOpen && !addOrCallOpen">
-            <section class="absolute inset-0"
-                     x-transition:enter="transition ease-out duration-200"
-                     x-transition:enter-start="opacity-0"
-                     x-transition:enter-end="opacity-100">
-                @include('partials.softphone.screen-held')
-            </section>
-        </template>
-
-        {{-- Idle (default authenticated view: tabs + selected panel) --}}
+        {{-- Idle: authenticated, no active call --}}
         <template x-if="phoneAuthenticated
-                          && !['ringing','ringing_inbound','ringing_outbound','active','speaking','held'].includes(phoneStatus)
-                          && !transferPanelOpen && !addOrCallOpen">
+                          && !['ringing','ringing_inbound','ringing_outbound','active','speaking','held','conference','transfer_consulting'].includes(phoneStatus)">
             <section class="absolute inset-0 flex flex-col"
                      x-transition:enter="transition ease-out duration-200"
                      x-transition:enter-start="opacity-0"

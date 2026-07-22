@@ -99,20 +99,22 @@ export function createAdapter({ baseUrl = '/telephony' } = {}) {
       return post(baseUrl, '/disconnect', {});
     },
 
-    // single-call
+    // single-call: WebRTC via SDK (primary), backend for call logging/routing only
     dial: async (number) => {
       console.log('[softphone-adapter] Dialing:', number);
-      // Place WebRTC outbound call first via SDK Client
+      // WebRTC call via SDK - this is the primary path
       if (sdkClient) {
         try {
           console.log('[softphone-adapter] Placing WebRTC dial via Ziwo Client...');
           sdkClient.startCall(number);
+          // Don't also POST to backend /dial — the SDK handles the actual call
+          // Backend is only needed for SIP-only fallback or call logging
+          return { status: 'success', via: 'webrtc' };
         } catch (err) {
-          console.error('[softphone-adapter] WebRTC startCall failed:', err);
+          console.error('[softphone-adapter] WebRTC startCall failed, falling back to API:', err);
         }
-      } else {
-        console.warn('[softphone-adapter] dial called but WebRTC SDK client is not initialized.');
       }
+      // Fallback: SIP-only backend dial
       return post(baseUrl, '/dial', { phone_number: number });
     },
 
@@ -206,16 +208,56 @@ export function createAdapter({ baseUrl = '/telephony' } = {}) {
       return post(baseUrl, '/dtmf', { call_id: callId, digit });
     },
 
-    // transfer
-    blindTransfer:    (callId, number) => post(baseUrl, '/transfer', { call_id: callId, number, type: 'blind' }),
-    attendedStart:    (callId, number) => post(baseUrl, '/transfer', { call_id: callId, number, type: 'attended' }),
-    attendedComplete: ()                => post(baseUrl, '/transfer', { type: 'proceed' }),
-    attendedCancel:   ()                => post(baseUrl, '/transfer', { type: 'cancel' }),
+    // transfer — backend requires: call_id + target_number + type
+    blindTransfer: async (callId, number) => {
+      console.log('[softphone-adapter] Blind transfer:', callId, '->', number);
+      // Try WebRTC SDK blind transfer first
+      if (sdkClient) {
+        try {
+          if (typeof sdkClient.transfer === 'function') sdkClient.transfer(number);
+          else if (typeof sdkClient.blindTransfer === 'function') sdkClient.blindTransfer(number);
+        } catch(e) { console.warn('[softphone-adapter] SDK blind transfer failed:', e); }
+      }
+      return post(baseUrl, '/transfer', { call_id: callId, target_number: number, type: 'blind' });
+    },
+    attendedStart: async (callId, number) => {
+      console.log('[softphone-adapter] Attended transfer start:', callId, '->', number);
+      if (sdkClient) {
+        try {
+          if (typeof sdkClient.attendedTransfer === 'function') sdkClient.attendedTransfer(number);
+          else if (typeof sdkClient.startCall === 'function') sdkClient.startCall(number); // consult leg
+        } catch(e) { console.warn('[softphone-adapter] SDK attended transfer start failed:', e); }
+      }
+      return post(baseUrl, '/transfer', { call_id: callId, target_number: number, type: 'warm' });
+    },
+    attendedComplete: (callId) => {
+      if (sdkClient && typeof sdkClient.completeTransfer === 'function') {
+        try { sdkClient.completeTransfer(); } catch(_) {}
+      }
+      return post(baseUrl, '/transfer', { call_id: callId, type: 'proceed' });
+    },
+    attendedCancel: (callId) => {
+      if (sdkClient && typeof sdkClient.cancelTransfer === 'function') {
+        try { sdkClient.cancelTransfer(); } catch(_) {}
+      }
+      return post(baseUrl, '/transfer', { call_id: callId, type: 'cancel' });
+    },
 
-    // conference
-    addParticipant:    (number, roomId) => post(baseUrl, '/conference', { number, room_id: roomId, call_id: roomId }),
-    removeParticipant: (callId)         => post(baseUrl, '/disconnect', { call_id: callId }),
-    leaveConference:   ()               => post(baseUrl, '/conference', { action: 'leave' }),
+    // conference — backend requires: call_id + target_number
+    addParticipant: async (number, callId) => {
+      console.log('[softphone-adapter] Conference add participant:', number, 'room:', callId);
+      // Try WebRTC conference via SDK
+      if (sdkClient) {
+        try {
+          if (typeof sdkClient.conference === 'function') sdkClient.conference(number);
+          else if (typeof sdkClient.addParticipant === 'function') sdkClient.addParticipant(number);
+          else if (typeof sdkClient.startCall === 'function') sdkClient.startCall(number); // new leg
+        } catch(e) { console.warn('[softphone-adapter] SDK conference add failed:', e); }
+      }
+      return post(baseUrl, '/conference', { call_id: callId, target_number: number, room_id: callId });
+    },
+    removeParticipant: (callId) => post(baseUrl, '/disconnect', { call_id: callId }),
+    leaveConference: (callId, roomId) => post(baseUrl, '/conference', { call_id: callId || roomId, target_number: '', action: 'leave', room_id: roomId }),
 
     // SDK event bridge
     onSdkEvent(cb) {
