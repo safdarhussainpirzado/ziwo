@@ -232,18 +232,36 @@ export function createAdapter({ baseUrl = '/telephony' } = {}) {
       return post(baseUrl, '/dtmf', { call_id: callId, digit });
     },
 
-    // transfer — backend requires: call_id + target_number + type
+    // ── Transfer ──────────────────────────────────────────────────────────
+    // ZIWO SDK: call.transfer(number) sends SIP REFER to PBX for blind transfer.
+    // After transfer, PBX handles the redirect — agent leg disconnects.
     blindTransfer: async (callId, number) => {
       console.log('[softphone-adapter] Blind transfer:', callId, '->', number);
-      // Try WebRTC SDK blind transfer first
-      if (sdkClient) {
+      const call = getCallInstance(callId);
+      if (call) {
         try {
-          if (typeof sdkClient.transfer === 'function') sdkClient.transfer(number);
-          else if (typeof sdkClient.blindTransfer === 'function') sdkClient.blindTransfer(number);
-        } catch(e) { console.warn('[softphone-adapter] SDK blind transfer failed:', e); }
+          // Try call-level transfer (SIP REFER) — correct WebRTC path
+          if (typeof call.transfer === 'function') {
+            call.transfer(number);
+            console.log('[softphone-adapter] Call.transfer() sent via WebRTC SDK');
+            // Also notify backend for logging
+            post(baseUrl, '/transfer', { call_id: callId, target_number: number, type: 'blind' }).catch(() => {});
+            return { status: 'success' };
+          }
+          // Fallback: sdkClient-level transfer
+          if (typeof sdkClient?.transfer === 'function') {
+            sdkClient.transfer(number);
+            post(baseUrl, '/transfer', { call_id: callId, target_number: number, type: 'blind' }).catch(() => {});
+            return { status: 'success' };
+          }
+        } catch(e) {
+          console.warn('[softphone-adapter] WebRTC transfer failed, using backend:', e);
+        }
       }
+      // Final fallback: backend-only transfer (SIP proxy)
       return post(baseUrl, '/transfer', { call_id: callId, target_number: number, type: 'blind' });
     },
+
     attendedStart: async (callId, number) => {
       console.log('[softphone-adapter] Attended transfer start:', callId, '->', number);
       if (sdkClient) {
@@ -267,18 +285,45 @@ export function createAdapter({ baseUrl = '/telephony' } = {}) {
       return post(baseUrl, '/transfer', { call_id: callId, type: 'cancel' });
     },
 
-    // conference — backend requires: call_id + target_number
-    addParticipant: async (number, callId) => {
-      console.log('[softphone-adapter] Conference add participant:', number, 'room:', callId);
-      // Try WebRTC conference via SDK
+    // ── Conference ────────────────────────────────────────────────────────
+    // ZIWO SDK conference: use call.conference(number) or sdkClient.conference(number).
+    // The SDK initiates a 3-way bridge on the PBX — the active call is held
+    // and the new participant is called. When they answer, all 3 are bridged.
+    addParticipant: async (number, roomCallId) => {
+      console.log('[softphone-adapter] Conference add participant:', number, 'room:', roomCallId);
+      const call = getCallInstance(roomCallId);
+      if (call) {
+        try {
+          // Preferred: call-level conference (hold current + dial new + bridge)
+          if (typeof call.conference === 'function') {
+            call.conference(number);
+            console.log('[softphone-adapter] call.conference() sent');
+            post(baseUrl, '/conference', { call_id: roomCallId, target_number: number }).catch(() => {});
+            return { status: 'success' };
+          }
+        } catch(e) {
+          console.warn('[softphone-adapter] call.conference() failed:', e);
+        }
+      }
+      // Fallback: sdkClient-level
       if (sdkClient) {
         try {
-          if (typeof sdkClient.conference === 'function') sdkClient.conference(number);
-          else if (typeof sdkClient.addParticipant === 'function') sdkClient.addParticipant(number);
-          else if (typeof sdkClient.startCall === 'function') sdkClient.startCall(number); // new leg
-        } catch(e) { console.warn('[softphone-adapter] SDK conference add failed:', e); }
+          if (typeof sdkClient.conference === 'function') {
+            sdkClient.conference(number);
+            post(baseUrl, '/conference', { call_id: roomCallId, target_number: number }).catch(() => {});
+            return { status: 'success' };
+          }
+          if (typeof sdkClient.addParticipant === 'function') {
+            sdkClient.addParticipant(number);
+            post(baseUrl, '/conference', { call_id: roomCallId, target_number: number }).catch(() => {});
+            return { status: 'success' };
+          }
+        } catch(e) {
+          console.warn('[softphone-adapter] sdkClient conference failed:', e);
+        }
       }
-      return post(baseUrl, '/conference', { call_id: callId, target_number: number, room_id: callId });
+      // Backend-only fallback
+      return post(baseUrl, '/conference', { call_id: roomCallId, target_number: number });
     },
     removeParticipant: (callId) => post(baseUrl, '/disconnect', { call_id: callId }),
     leaveConference: (callId, roomId) => post(baseUrl, '/conference', { call_id: callId || roomId, target_number: '', action: 'leave', room_id: roomId }),

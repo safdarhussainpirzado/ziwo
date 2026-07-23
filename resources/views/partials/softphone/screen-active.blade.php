@@ -95,11 +95,19 @@
                     <div class="text-[10px] font-bold text-white">Calling participant…</div>
                     <div class="text-[9px] font-mono text-indigo-300" x-text="conferenceDialingNumber"></div>
                 </div>
-                <div class="flex items-center gap-1">
+                {{-- Pulsing dots --}}
+                <div class="flex items-center gap-1 mr-2">
                     <div class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping"></div>
                     <div class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" style="animation-delay:0.2s"></div>
                     <div class="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" style="animation-delay:0.4s"></div>
                 </div>
+                {{-- Cancel button --}}
+                <button type="button"
+                        @click="Alpine.store('softphone').send?.({ type: 'HANGUP_ALL' })"
+                        class="shrink-0 w-7 h-7 rounded-lg bg-rose-600/80 hover:bg-rose-600 text-white grid place-items-center transition"
+                        title="Cancel conference dial">
+                    <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
             </div>
         </div>
     </template>

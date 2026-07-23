@@ -167,12 +167,18 @@ export function createMachine() {
         t = EVENTS.REMOTE_HANGUP;
       } else if (kind === 'held') {
         t = EVENTS.HOLD;
+        event._fromSdk = true; // SDK confirms hold — guard against feedback loops
       } else if (kind === 'unheld') {
         t = EVENTS.UNHOLD;
+        event._fromSdk = true; // SDK confirms unhold — guard against feedback loops
       } else if (kind === 'mute') {
+        // SDK confirms mute — just update state flag, do NOT re-trigger adapter.mute()
         t = EVENTS.MUTE;
+        event._fromSdk = true;
       } else if (kind === 'unmute') {
+        // SDK confirms unmute — just update state flag, do NOT re-trigger adapter.unmute()
         t = EVENTS.UNMUTE;
+        event._fromSdk = true;
       } else if (kind === 'connected') {
         // SDK connected = WebRTC session established; if in dialing, treat as answered
         if (state === STATES.DIALING || state === STATES.CONNECTING) {
@@ -259,7 +265,7 @@ export function createMachine() {
         if (t === EVENTS.HOLD) {
           return set(STATES.IN_CALL_HELD, () => {
             if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isHeld = true;
-            effects.push(() => ctx._adapter?.hold?.(ctx.activeCallId));
+            if (!event._fromSdk) effects.push(() => ctx._adapter?.hold?.(ctx.activeCallId));
           });
         }
         if (t === EVENTS.REMOTE_HANGUP) {
@@ -285,7 +291,8 @@ export function createMachine() {
         if (t === EVENTS.BLIND_TRANSFER) {
           return set(STATES.READY, () => {
             const id = ctx.activeCallId;
-            effects.push(() => ctx._adapter?.blindTransfer?.(id, event.number || event.callId));
+            const targetNumber = event.number; // transfer target number (NOT event.callId)
+            effects.push(() => ctx._adapter?.blindTransfer?.(id, targetNumber));
             delete ctx.calls[id];
             resetCallRefs();
           });
@@ -300,12 +307,13 @@ export function createMachine() {
         }
         if (t === EVENTS.MUTE) {
           if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = true;
-          effects.push(() => ctx._adapter?.mute?.(ctx.activeCallId));
+          // Only call adapter.mute() for user-initiated events, not SDK confirmations
+          if (!event._fromSdk) effects.push(() => ctx._adapter?.mute?.(ctx.activeCallId));
           return set(STATES.IN_CALL_ACTIVE);
         }
         if (t === EVENTS.UNMUTE) {
           if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = false;
-          effects.push(() => ctx._adapter?.unmute?.(ctx.activeCallId));
+          if (!event._fromSdk) effects.push(() => ctx._adapter?.unmute?.(ctx.activeCallId));
           return set(STATES.IN_CALL_ACTIVE);
         }
         if (t === EVENTS.HANGUP_ALL) {
@@ -323,17 +331,17 @@ export function createMachine() {
         if (t === EVENTS.UNHOLD) {
           return set(STATES.IN_CALL_ACTIVE, () => {
             if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isHeld = false;
-            effects.push(() => ctx._adapter?.unhold?.(ctx.activeCallId));
+            if (!event._fromSdk) effects.push(() => ctx._adapter?.unhold?.(ctx.activeCallId));
           });
         }
         if (t === EVENTS.MUTE) {
           if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = true;
-          effects.push(() => ctx._adapter?.mute?.(ctx.activeCallId));
+          if (!event._fromSdk) effects.push(() => ctx._adapter?.mute?.(ctx.activeCallId));
           return set(STATES.IN_CALL_HELD);
         }
         if (t === EVENTS.UNMUTE) {
           if (ctx.activeCallId) ctx.calls[ctx.activeCallId].isMuted = false;
-          effects.push(() => ctx._adapter?.unmute?.(ctx.activeCallId));
+          if (!event._fromSdk) effects.push(() => ctx._adapter?.unmute?.(ctx.activeCallId));
           return set(STATES.IN_CALL_HELD);
         }
         if (t === EVENTS.ADD_PARTICIPANT) {
